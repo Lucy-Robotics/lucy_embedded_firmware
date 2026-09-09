@@ -1,83 +1,222 @@
+//! YAML → Rust config codegen for RP2040 firmware builds.
+//!
+//! Expected `config.yaml` shape (per board):
+//! ```yaml
+//! board_id: rp2040_left_arm
+//! slave_address: 1
+//! actuators:
+//!   - id: left_shoulder_z
+//!     enabled: true
+//!     virtual_pin: 0
+//!     hardware:
+//!       driver: PwmServoConfig
+//!     modbus:
+//!       adapter: PwmServoModbusAdapter
+//!     attributes:
+//!       min_pulse: 1250
+//!       max_pulse: 2500
+//!       min_angle: 0
+//!       max_angle: 180
+//!       default_angle: 90
+//! ```
+
 use heck::ToSnakeCase;
-use std::env;
-use std::path::PathBuf;
-use std::collections::BTreeMap;
-use std::fs;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 
-use lucy_embedded_firmware_core::drivers::pwm_servo;
+#[derive(Debug, Deserialize)]
+pub struct FirmwareConfig {
+    #[serde(default = "default_slave")]
+    pub slave_address: u8,
+    #[serde(default)]
+    pub board_id: Option<String>,
+    pub actuators: Vec<ActuatorConfig>,
+}
 
-pub fn build_config(config_path: String) {
-    println!("cargo:warning=Building...");
-    println!("cargo:rerun-if-changed=config.yaml");
+fn default_slave() -> u8 {
+    1
+}
 
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let destpath = PathBuf::from(out_dir).join("config.rs");
-    let contents = fs::read_to_string(config_path).expect("Failed to read");
+#[derive(Debug, Deserialize)]
+pub struct ActuatorConfig {
+    pub id: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub virtual_pin: u16,
+    pub hardware: HardwareRef,
+    pub modbus: ModbusRef,
+    #[serde(default)]
+    pub attributes: BTreeMap<String, serde_yaml::Value>,
+}
 
-    let yaml_struct: BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(&contents).expect("Failed to parse YAML");
+fn default_true() -> bool {
+    true
+}
 
-    yaml_struct["actuators"].as_sequence().unwrap().iter().filter(|actuator| {
-        actuator["enabled"].as_bool().unwrap_or(false)
-    }).for_each(|actuator| {
-        let actuator_ident = format_ident!("{}", actuator["id"].as_str().unwrap());
-        let actuator_config_class = format_ident!("{}Config", actuator["type"].as_str().unwrap());
-        let actuator_driver_class = format_ident!("{}Driver", actuator["type"].as_str().unwrap());
-        let actuator_modbus_class = format_ident!("{}Driver", actuator["type"].as_str().unwrap());
-        let to_idents = |name: &str| {
-            (
-                format_ident!("{}", name.to_snake_case()),
-                format_ident!("{}", name),
-            )
-        };
+#[derive(Debug, Deserialize)]
+pub struct HardwareRef {
+    pub driver: String,
+}
 
-        let config: Vec<TokenStream> = actuator["config"].as_mapping().unwrap().iter().map(|(k,v)| {
-            let key = format_ident!("{}", k.as_str().unwrap());
-            let value = v.as_u64().unwrap();
-            quote! {
-                #key: #value,
-            }
-        }).collect();
+#[derive(Debug, Deserialize)]
+pub struct ModbusRef {
+    pub adapter: String,
+}
 
-        let (adapter_name, adapter_type) = to_idents(actuator["modbus"]["adapter"].as_str().unwrap());
-        let expanded = quote! {
-            pub struct ModbusVariables {
-                #actuator_ident: #adapter_type,
-            }
-
-            impl ModbusVariables {
-                pub fn tick(&self mut) {
-
-                }
-            }
-
-            pub fn pre_config() {
-                let tmp = &#actuator_config_class {
-                    #(#config)*
-                };
-            }
-        };
-        println!("cargo:warning={}", expanded);
-        std::fs::write(&destpath, expanded.to_string()).expect("Failed to write file");
-    });
-    let expanded = quote! {
-        pub struct ModbusAdapters {
-
-        }
-
-        impl ModbusAdapters {
-            pub fn tick(&mut self) {
-
+fn yaml_value_to_tokens(value: &serde_yaml::Value) -> TokenStream {
+    match value {
+        serde_yaml::Value::Bool(b) => quote! { #b },
+        serde_yaml::Value::Number(n) => {
+            if let Some(i) = n.as_u64() {
+                let v = i as u16;
+                quote! { #v }
+            } else if let Some(i) = n.as_i64() {
+                let v = i as i32;
+                quote! { #v }
+            } else if let Some(f) = n.as_f64() {
+                let v = f as f32;
+                quote! { #v }
+            } else {
+                quote! { 0u16 }
             }
         }
+        serde_yaml::Value::String(s) => {
+            // Allow numeric strings from legacy generators
+            if let Ok(v) = s.parse::<u16>() {
+                quote! { #v }
+            } else {
+                quote! { #s }
+            }
+        }
+        _ => quote! { 0u16 },
+    }
+}
 
-        pub fn pre_config() {
+/// Generate Rust source for enabled actuators and write to `$OUT_DIR/config.rs`.
+pub fn build_config(config_path: impl AsRef<Path>) {
+    let config_path = config_path.as_ref();
+    println!("cargo:rerun-if-changed={}", config_path.display());
 
+    let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR not set");
+    let filepath = PathBuf::from(out_dir).join("config.rs");
+
+    let contents = fs::read_to_string(config_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", config_path.display()));
+
+    let parsed: FirmwareConfig = serde_yaml::from_str(&contents)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", config_path.display()));
+
+    let code = generate_config_tokens(&parsed);
+    fs::write(&filepath, code.to_string())
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", filepath.display()));
+}
+
+pub fn generate_config_tokens(config: &FirmwareConfig) -> TokenStream {
+    let slave = config.slave_address;
+    let mut driver_lets = Vec::new();
+    let mut adapter_lets = Vec::new();
+    let mut adapter_idents = Vec::new();
+
+    for actuator in config.actuators.iter().filter(|a| a.enabled) {
+        let snake = actuator.id.to_snake_case();
+        let driver_var = format_ident!("{}_config", snake);
+        let adapter_var = format_ident!("{}_adapter", snake);
+        let driver_type = format_ident!("{}", actuator.hardware.driver);
+        let adapter_type = format_ident!("{}", actuator.modbus.adapter);
+
+        let fields: Vec<TokenStream> = actuator
+            .attributes
+            .iter()
+            .map(|(k, v)| {
+                let key = format_ident!("{}", k);
+                let value = yaml_value_to_tokens(v);
+                quote! { #key: #value }
+            })
+            .collect();
+
+        let base = actuator.virtual_pin.saturating_mul(2);
+
+        driver_lets.push(quote! {
+            let #driver_var = #driver_type {
+                #(#fields),*
+            };
+        });
+
+        // Adapter construction is left as a template comment block for the firmware
+        // to wire channels; we emit register offsets and config binding helpers.
+        adapter_lets.push(quote! {
+            // Actuator `#snake`: base_register = #base (cmd=#base, angle=#base+1)
+            let #adapter_var = (#base, #driver_var);
+        });
+        adapter_idents.push(adapter_var);
+    }
+
+    let actuator_count = adapter_idents.len();
+    let board = config
+        .board_id
+        .as_deref()
+        .unwrap_or("unknown");
+
+    quote! {
+        /// Auto-generated by `builder::build_config`. Do not edit.
+        pub const GENERATED_BOARD_ID: &str = #board;
+        pub const GENERATED_SLAVE_ADDRESS: u8 = #slave;
+
+        pub fn generated_actuator_count() -> usize {
+            #actuator_count
         }
 
-        pub fn post_config() {
-
+        #[allow(unused_variables, unused_mut)]
+        pub fn init_generated_configs() {
+            #(#driver_lets)*
+            #(#adapter_lets)*
         }
-    };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generates_enabled_actuators_only() {
+        let yaml = r#"
+board_id: test_board
+slave_address: 1
+actuators:
+  - id: joint_a
+    enabled: true
+    virtual_pin: 0
+    hardware: { driver: PwmServoConfig }
+    modbus: { adapter: PwmServoModbusAdapter }
+    attributes:
+      min_pulse: 1250
+      max_pulse: 2500
+      min_angle: 0
+      max_angle: 180
+      default_angle: 90
+  - id: joint_b
+    enabled: false
+    virtual_pin: 1
+    hardware: { driver: PwmServoConfig }
+    modbus: { adapter: PwmServoModbusAdapter }
+    attributes:
+      min_pulse: 1250
+      max_pulse: 2500
+      min_angle: 0
+      max_angle: 180
+      default_angle: 90
+"#;
+        let cfg: FirmwareConfig = serde_yaml::from_str(yaml).unwrap();
+        let tokens = generate_config_tokens(&cfg).to_string();
+        assert!(tokens.contains("GENERATED_BOARD_ID"));
+        assert!(tokens.contains("joint_a_config"));
+        assert!(!tokens.contains("joint_b_config"));
+        assert!(tokens.contains("1250"));
+    }
 }
