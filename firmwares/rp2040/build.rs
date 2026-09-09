@@ -29,14 +29,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=config.yaml");
 
-    // Generate board configuration Rust from YAML (if present / valid for codegen).
-    // Hardware-catalog style YAMLs may not yet match the builder schema; keep the
-    // call so pipeline-generated configs are consumed during firmware builds.
+    // Generate board configuration Rust from YAML when it matches the builder schema
+    // (pipeline emits board_id/actuators; ignore WIP hardware-catalog dumps).
     let config_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml");
     if config_path.exists() {
-        // Prefer pipeline-style simple configs; ignore parse failures for WIP catalogs.
         if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if contents.contains("serial_id:") || contents.contains("servos:") {
+            if contents.contains("actuators:") && contents.contains("virtual_pin:") {
                 build_config(config_path.to_string_lossy().into_owned());
             }
         }
