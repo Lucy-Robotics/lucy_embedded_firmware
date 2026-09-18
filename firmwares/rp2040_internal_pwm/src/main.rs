@@ -31,6 +31,7 @@ impl<'a> Write for BufferWriter<'a> {
     }
 }
 
+mod board_layout;
 mod channel;
 use channel::Rp2040PwmChannel;
 mod config;
@@ -192,8 +193,8 @@ fn main() -> ! {
         min_pulse: 0,
         max_pulse: 4096,
         min_angle: 0,
-        max_angle: 360,
-        default_angle: 90
+        max_angle: 6283,
+        default_angle: 1571
     };
 
     let mut driver = BusServoDriver {

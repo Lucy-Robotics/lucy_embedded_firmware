@@ -17,31 +17,44 @@ pixi run firmware-flash
 
 | Path | Role |
 |------|------|
-| `crates/lucy_embedded_firmware_core` | `no_std` Modbus + PWM servo drivers |
-| `crates/builder` | YAML → `config.rs` codegen |
-| `firmwares/rp2040` | Bare-metal RP2040 binary |
+| `crates/lucy_embedded_firmware_core` | `no_std` Modbus + drivers + `BoardLayout` |
+| `crates/builder` | YAML → `$OUT_DIR/config.rs` codegen (auto virtual pins) |
+| `firmwares/rp2040_internal_pwm` | On-board PWM (`Servo1..16` → GPIO6..21) |
+| `firmwares/rp2040_bus_servo` | UART bus-servo stub |
+| `firmwares/rp2040_i2c_pwm` | Internal PWM + I2C/PCA9685 stub |
 | `firmwares/sim` | Host-side Modbus client (dev) |
 
 ## Config
 
-Place `firmwares/rp2040/config.yaml` (or let the Lucy config pipeline install
-`config_<board>.yaml` under `config/`). `build.rs` calls `builder::build_config`.
+Place architecture-shaped `config.yaml` in the selected board crate (or let the
+Lucy config pipeline install `config_<board>.yaml`). `build.rs` calls
+`builder::build_config` when the file contains `actuators:`.
 
-## Register map
+Angles in YAML are **radians (float)**; codegen emits **milliradian `u16`**
+(`rad × 1000`, `+0.5` cast). `virtual_pin` is **not** authored in YAML — the
+builder assigns contiguous Modbus blocks from enabled actuators then sensors.
 
-Per actuator at `virtual_pin * 2`:
+## Register map (build-assigned)
 
-| Offset | Meaning |
-|--------|---------|
-| 0 | cmd (`1` = move, `2` = reset) |
-| 1 | angle **milliradians** (`rad × 1000`) |
+| Driver | Registers |
+|--------|-----------|
+| PwmServo | 2 — cmd, angle (millirad) |
+| BusServo | 3 — id, angle, cmd |
+| PressureSensor | 2 — cmd, value |
 
-Config `default_angle` / `min_angle` / `max_angle` remain in **degrees**; the driver converts on reset and when mapping pulses.
+## Board class → crate
+
+| `board_class` | Crate package |
+|---------------|---------------|
+| `internal_servo_only` | `lucy_embedded_firmware_rp2040_internal_pwm` |
+| `bus_servo_only` | `lucy_embedded_firmware_rp2040_bus_servo` |
+| `internal_servo_i2c_pwm` | `lucy_embedded_firmware_rp2040_i2c_pwm` |
 
 ## PWM notes
 
-Milliradian→pulse uses rounded mapping into duty counts (default 1250–2500 ≈ 1–2 ms at 50 Hz).
-Unit tests cover 180° / 270° / 300° midpoints and half-step rounding.
+Milliradian→pulse maps within `min_angle`..`max_angle` (millirad) into duty
+counts. Unit tests cover midpoints and half-step rounding (`no_std`, no
+`f32::round`).
 
 ## Troubleshooting
 

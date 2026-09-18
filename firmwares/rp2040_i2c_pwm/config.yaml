@@ -1,0 +1,8 @@
+board_id: rp2040_torso_head
+board: rp2040
+board_class: internal_servo_i2c_pwm
+slave_address: 1
+firmware_crate: firmwares/rp2040_i2c_pwm
+actuators:
+sensors:
+  []

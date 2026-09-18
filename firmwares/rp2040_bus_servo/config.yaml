@@ -1,0 +1,92 @@
+board_id: rp2040_so_arm
+board: rp2040
+board_class: bus_servo_only
+slave_address: 1
+firmware_crate: firmwares/rp2040_bus_servo
+actuators:
+  - id: rotation
+    enabled: true
+    urdf:
+      joint: Rotation
+    config:
+      min_angle: 1.08759
+      max_angle: 4.95322
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:1
+  - id: pitch
+    enabled: true
+    urdf:
+      joint: Pitch
+    config:
+      min_angle: 1.28548
+      max_angle: 4.92408
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:2
+  - id: elbow
+    enabled: true
+    urdf:
+      joint: Elbow
+    config:
+      min_angle: 1.29621
+      max_angle: 4.73233
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:3
+  - id: wrist_pitch
+    enabled: true
+    urdf:
+      joint: Wrist_Pitch
+    config:
+      min_angle: 1.22412
+      max_angle: 4.88266
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:4
+  - id: wrist_roll
+    enabled: true
+    urdf:
+      joint: Wrist_Roll
+    config:
+      min_angle: 0.0
+      max_angle: 6.28165
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:5
+  - id: jaw
+    enabled: true
+    urdf:
+      joint: Jaw
+    config:
+      min_angle: 3.11858
+      max_angle: 5.40728
+      default_angle: 3.14159
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: BusServoDriver
+      channel: UART0:6
+sensors:
+  []

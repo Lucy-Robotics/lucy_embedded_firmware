@@ -1,3 +1,10 @@
+/// Generated board instance consts (virtual pins, configs).
+#[allow(unused_imports, dead_code)]
+mod _generated {
+    include!(concat!(env!("OUT_DIR"), "/config.rs"));
+}
+pub use _generated::*;
+
 use rp2040_hal::{
     uart::{Writer, Reader, UartDevice, ValidUartPinout},
     uart::{DataBits, StopBits, UartConfig, UartPeripheral, State},
@@ -49,12 +56,12 @@ type Servo11 = Rp2040PwmChannel<Channel<Slice<Pwm5, FreeRunning>, A>>;
 type Servo12 = Rp2040PwmChannel<Channel<Slice<Pwm5, FreeRunning>, B>>;
 
 pub struct Robot {
-    pub servo1: PwmServoModbusAdapter<180, Servo7>,
-    pub servo2: PwmServoModbusAdapter<180, Servo8>, 
-    pub servo3: PwmServoModbusAdapter<180, Servo9>, 
-    pub servo4: PwmServoModbusAdapter<180, Servo10>, 
-    pub servo5: PwmServoModbusAdapter<180, Servo11>, 
-    pub servo6: PwmServoModbusAdapter<180, Servo12>,
+    pub servo1: PwmServoModbusAdapter<3142, Servo7>,
+    pub servo2: PwmServoModbusAdapter<3142, Servo8>, 
+    pub servo3: PwmServoModbusAdapter<3142, Servo9>, 
+    pub servo4: PwmServoModbusAdapter<3142, Servo10>, 
+    pub servo5: PwmServoModbusAdapter<3142, Servo11>, 
+    pub servo6: PwmServoModbusAdapter<3142, Servo12>,
 }
 
 impl Robot {
@@ -123,8 +130,8 @@ pub fn config(
         min_pulse: 500,
         max_pulse: 2500,
         min_angle: 0,
-        max_angle: 300,
-        default_angle: 90
+        max_angle: 5236,
+        default_angle: 1571
     };
 
     let mut driver = PwmServoDriver {
@@ -148,8 +155,8 @@ pub fn config(
         min_pulse: 1000,
         max_pulse: 2000,
         min_angle: 0,
-        max_angle: 300,
-        default_angle: 90
+        max_angle: 5236,
+        default_angle: 1571
     };
 
     let mut driver2 = PwmServoDriver {
@@ -179,8 +186,8 @@ pub fn config(
         min_pulse: 600,
         max_pulse: 2500,
         min_angle: 0,
-        max_angle: 180,
-        default_angle: 90
+        max_angle: 3142,
+        default_angle: 1571
     };
 
     let driver = PwmServoDriver {
@@ -204,8 +211,8 @@ pub fn config(
         min_pulse: 600,
         max_pulse: 2500,
         min_angle: 0,
-        max_angle: 180,
-        default_angle: 90
+        max_angle: 3142,
+        default_angle: 1571
     };
 
     let driver = PwmServoDriver {
@@ -235,8 +242,8 @@ pub fn config(
         min_pulse: 600,
         max_pulse: 2500,
         min_angle: 0,
-        max_angle: 180,
-        default_angle: 90
+        max_angle: 3142,
+        default_angle: 1571
     };
 
     let driver = PwmServoDriver {
@@ -260,8 +267,8 @@ pub fn config(
         min_pulse: 600,
         max_pulse: 2500,
         min_angle: 0,
-        max_angle: 180,
-        default_angle: 90
+        max_angle: 3142,
+        default_angle: 1571
     };
 
     let driver = PwmServoDriver {

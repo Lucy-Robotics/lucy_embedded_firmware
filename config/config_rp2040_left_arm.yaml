@@ -1,0 +1,8 @@
+board_id: rp2040_left_arm
+board: rp2040
+board_class: internal_servo_only
+slave_address: 1
+firmware_crate: firmwares/rp2040_internal_pwm
+actuators:
+sensors:
+  []
