@@ -2,6 +2,7 @@ board_id: rp2040_right_arm
 board: rp2040
 board_class: internal_servo_only
 slave_address: 1
+serial_id: "E6617C93E37A6629"
 firmware_crate: firmwares/rp2040_internal_pwm
 actuators:
 sensors:

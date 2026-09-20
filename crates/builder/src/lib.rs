@@ -66,6 +66,9 @@ pub struct FirmwareConfig {
     pub board_class: Option<String>,
     #[serde(default)]
     pub firmware_crate: Option<String>,
+    /// USB CDC serial string; must match host YAML ``serial_id`` when set.
+    #[serde(default)]
+    pub serial_id: Option<String>,
     #[serde(default)]
     pub actuators: Vec<ActuatorConfig>,
     #[serde(default)]
@@ -81,6 +84,10 @@ pub struct ActuatorConfig {
     pub id: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Host ros2_control ``virtual_pin`` (register slot). When set, firmware
+    /// keeps the same index so Modbus bases match LucySystemHardware.
+    #[serde(default)]
+    pub virtual_pin: Option<u16>,
     #[serde(default)]
     pub urdf: Option<UrdfRef>,
     #[serde(default)]
@@ -93,6 +100,8 @@ pub struct SensorConfig {
     pub id: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub virtual_pin: Option<u16>,
     #[serde(default)]
     pub config: BTreeMap<String, serde_yaml::Value>,
     pub hardware: HardwareRef,
@@ -142,6 +151,7 @@ pub struct AssignmentPlan {
     pub board_id: String,
     pub board_class: String,
     pub slave_address: u8,
+    pub serial_id: String,
     pub devices: Vec<DeviceAssignment>,
 }
 
@@ -248,26 +258,32 @@ pub fn normalize_config_fields(
 }
 
 /// Assign virtual pins / register bases using the board layout.
+///
+/// When YAML carries host ``virtual_pin``, that value is kept and
+/// ``base_register = virtual_pin * block_size`` so firmware matches
+/// ``LucySystemHardware``. Otherwise pins are assigned densely 0..K-1 among
+/// enabled devices (legacy local builds).
 pub fn assign_devices(
     config: &FirmwareConfig,
     layout: &dyn BoardLayout,
 ) -> Result<AssignmentPlan, BuildError> {
     let mut devices = Vec::new();
-    let mut next_base: u16 = 0;
     let mut used_bases: BTreeSet<u16> = BTreeSet::new();
     let mut used_channels: BTreeSet<String> = BTreeSet::new();
-    let mut virtual_pin: u16 = 0;
+    let mut used_virtual_pins: BTreeSet<u16> = BTreeSet::new();
+    let mut next_auto_pin: u16 = 0;
 
     let mut push = |id: String,
                     kind: DeviceKind,
                     driver: String,
                     channel: String,
+                    host_virtual_pin: Option<u16>,
                     raw_config: &BTreeMap<String, serde_yaml::Value>|
      -> Result<(), BuildError> {
         if !used_channels.insert(channel.clone()) {
             return Err(BuildError::RegisterCollision {
                 id: id.clone(),
-                base: next_base,
+                base: 0,
             });
         }
         let hardware = layout.resolve(&channel).ok_or_else(|| BuildError::UnknownChannel {
@@ -278,6 +294,21 @@ pub fn assign_devices(
             id: id.clone(),
             driver: driver.clone(),
         })?;
+
+        let virtual_pin = if let Some(vp) = host_virtual_pin {
+            vp
+        } else {
+            let vp = next_auto_pin;
+            next_auto_pin = next_auto_pin.saturating_add(1);
+            vp
+        };
+        if !used_virtual_pins.insert(virtual_pin) {
+            return Err(BuildError::RegisterCollision {
+                id: id.clone(),
+                base: virtual_pin.saturating_mul(nb),
+            });
+        }
+        let next_base = virtual_pin.saturating_mul(nb);
 
         for r in next_base..next_base.saturating_add(nb) {
             if used_bases.contains(&r) {
@@ -303,8 +334,6 @@ pub fn assign_devices(
         for r in next_base..next_base.saturating_add(nb) {
             used_bases.insert(r);
         }
-        next_base = next_base.saturating_add(nb);
-        virtual_pin = virtual_pin.saturating_add(1);
         devices.push(assignment);
         Ok(())
     };
@@ -315,6 +344,7 @@ pub fn assign_devices(
             DeviceKind::Actuator,
             a.hardware.driver.clone(),
             a.hardware.channel.clone(),
+            a.virtual_pin,
             &a.config,
         )?;
     }
@@ -324,6 +354,7 @@ pub fn assign_devices(
             DeviceKind::Sensor,
             s.hardware.driver.clone(),
             s.hardware.channel.clone(),
+            s.virtual_pin,
             &s.config,
         )?;
     }
@@ -338,6 +369,12 @@ pub fn assign_devices(
             .clone()
             .unwrap_or_else(|| "unknown".into()),
         slave_address: config.slave_address,
+        serial_id: config
+            .serial_id
+            .clone()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         devices,
     })
 }
@@ -383,7 +420,16 @@ pub fn write_empty_config() {
         /// Auto-generated stub (no actuators: in config.yaml).
         pub const GENERATED_BOARD_ID: &str = "unset";
         pub const GENERATED_SLAVE_ADDRESS: u8 = 1;
+        pub const GENERATED_USB_SERIAL_ID: &str = "";
         pub const GENERATED_DEVICE_COUNT: usize = 0;
+        #[derive(Clone, Copy)]
+        pub struct GeneratedPwmDevice {
+            pub gpio: u8,
+            pub base_register: u16,
+            pub config: lucy_embedded_firmware_core::drivers::PwmServoConfig,
+        }
+        pub const GENERATED_PWM_DEVICE_COUNT: usize = 0;
+        pub const GENERATED_PWM_DEVICES: &[GeneratedPwmDevice] = &[];
         pub fn init_generated_configs() {}
     };
     fs::write(&filepath, code.to_string())
@@ -438,6 +484,7 @@ pub fn generate_config_tokens(plan: &AssignmentPlan) -> TokenStream {
     let slave = plan.slave_address;
     let board = plan.board_id.as_str();
     let board_class = plan.board_class.as_str();
+    let serial_id = plan.serial_id.as_str();
     let device_count = plan.devices.len();
 
     let mut const_blocks = Vec::new();
@@ -495,14 +542,46 @@ pub fn generate_config_tokens(plan: &AssignmentPlan) -> TokenStream {
         });
     }
 
+    let mut pwm_entries = Vec::new();
+    for dev in &plan.devices {
+        if let HardwareIdentity::PwmGpio { gpio, .. } = &dev.hardware {
+            let shouty = dev.id.to_shouty_snake_case();
+            let config_const = format_ident!("{}_CONFIG", shouty);
+            let base = dev.base_register;
+            pwm_entries.push(quote! {
+                GeneratedPwmDevice {
+                    gpio: #gpio,
+                    base_register: #base,
+                    config: #config_const,
+                }
+            });
+        }
+    }
+    let pwm_count = pwm_entries.len();
+
     quote! {
         /// Auto-generated by `builder::build_config`. Do not edit.
         pub const GENERATED_BOARD_ID: &str = #board;
         pub const GENERATED_BOARD_CLASS: &str = #board_class;
         pub const GENERATED_SLAVE_ADDRESS: u8 = #slave;
+        /// USB CDC serial; must match host ``serial_id`` (flash unique id hex).
+        pub const GENERATED_USB_SERIAL_ID: &str = #serial_id;
         pub const GENERATED_DEVICE_COUNT: usize = #device_count;
 
         #(#const_blocks)*
+
+        /// One enabled on-board PWM servo (Servo2040 silk = gpio+1).
+        #[derive(Clone, Copy)]
+        pub struct GeneratedPwmDevice {
+            pub gpio: u8,
+            pub base_register: u16,
+            pub config: lucy_embedded_firmware_core::drivers::PwmServoConfig,
+        }
+
+        pub const GENERATED_PWM_DEVICE_COUNT: usize = #pwm_count;
+        pub const GENERATED_PWM_DEVICES: &[GeneratedPwmDevice] = &[
+            #(#pwm_entries),*
+        ];
 
         #[allow(unused_variables, unused_mut)]
         pub fn init_generated_configs() {
@@ -563,14 +642,47 @@ sensors:
     }
 
     #[test]
-    fn pin_table_servo10_is_gpio15() {
+    fn pin_table_servo10_is_gpio9() {
         let layout = Rp2040InternalPwmLayout;
         let hw = layout.resolve("Servo10").unwrap();
         assert_eq!(
             hw,
             HardwareIdentity::PwmGpio {
                 servo_index: 10,
-                gpio: 15
+                gpio: 9
+            }
+        );
+    }
+
+    #[test]
+    fn enabled_only_pwm_devices_in_codegen() {
+        let cfg: FirmwareConfig = serde_yaml::from_str(sample_yaml()).unwrap();
+        let plan = plan_config(&cfg).unwrap();
+        let src = generate_config_tokens(&plan).to_string();
+        assert!(src.contains("GENERATED_PWM_DEVICE_COUNT : usize = 1usize"));
+        assert!(src.contains("gpio : 9u8"));
+        // Disabled Servo1 must not appear in the PWM device table.
+        assert!(!src.contains("gpio : 0u8"));
+        assert!(src.contains("Servo10"));
+    }
+
+    #[test]
+    fn servo18_maps_to_gpio17() {
+        let yaml = r#"
+board_class: internal_servo_only
+actuators:
+  - id: tip
+    enabled: true
+    config: { min_angle: 0.0, max_angle: 1.0, default_angle: 0.0, min_pulse: 1, max_pulse: 2 }
+    hardware: { driver: PwmServoDriver, channel: Servo18 }
+"#;
+        let cfg: FirmwareConfig = serde_yaml::from_str(yaml).unwrap();
+        let plan = plan_config(&cfg).unwrap();
+        assert_eq!(
+            plan.devices[0].hardware,
+            HardwareIdentity::PwmGpio {
+                servo_index: 18,
+                gpio: 17
             }
         );
     }
@@ -674,16 +786,22 @@ actuators:
 "#;
         let cfg: FirmwareConfig = serde_yaml::from_str(yaml).unwrap();
         let plan = plan_config(&cfg).unwrap();
-        assert_eq!(plan.devices[0].base_register, 0);
-        assert_eq!(plan.devices[0].nb_registers, 2);
-        assert_eq!(plan.devices[1].base_register, 2);
-        assert_eq!(plan.devices[1].nb_registers, 3);
+        let pwm = plan.devices.iter().find(|d| d.id == "a").unwrap();
+        let bus = plan.devices.iter().find(|d| d.id == "b").unwrap();
+        assert_eq!(pwm.virtual_pin, 0);
+        assert_eq!(pwm.nb_registers, 2);
+        assert_eq!(pwm.base_register, 0);
+        assert_eq!(bus.virtual_pin, 1);
+        assert_eq!(bus.nb_registers, 3);
+        // base = virtual_pin * driver block size (matches host LucySystemHardware).
+        assert_eq!(bus.base_register, 3);
         let occupied: BTreeSet<u16> = plan
             .devices
             .iter()
             .flat_map(|d| d.base_register..d.base_register + d.nb_registers)
             .collect();
         assert_eq!(occupied.len(), 5);
+        assert!(!occupied.contains(&2)); // hole between PWM block and bus block
     }
 
     #[test]

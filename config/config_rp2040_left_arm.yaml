@@ -2,7 +2,23 @@ board_id: rp2040_left_arm
 board: rp2040
 board_class: internal_servo_only
 slave_address: 1
+serial_id: "E6617C93E3858429"
 firmware_crate: firmwares/rp2040_internal_pwm
 actuators:
+  - id: left_pinky
+    enabled: true
+    virtual_pin: 0
+    urdf:
+      joint: i01.leftHand.pinky_link_joint
+    config:
+      min_angle: 0.0
+      max_angle: 5.235987755982989
+      default_angle: 0.0
+      min_pulse: 1250
+      max_pulse: 2500
+    hardware:
+      board: rp2040
+      driver: PwmServoDriver
+      channel: Servo1
 sensors:
   []

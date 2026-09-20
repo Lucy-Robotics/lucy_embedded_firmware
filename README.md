@@ -19,7 +19,7 @@ pixi run firmware-flash
 |------|------|
 | `crates/lucy_embedded_firmware_core` | `no_std` Modbus + drivers + `BoardLayout` |
 | `crates/builder` | YAML → `$OUT_DIR/config.rs` codegen (auto virtual pins) |
-| `firmwares/rp2040_internal_pwm` | On-board PWM (`Servo1..16` → GPIO6..21) |
+| `firmwares/rp2040_internal_pwm` | On-board PWM / Servo2040 (`Servo1..18` → GPIO0..17) |
 | `firmwares/rp2040_bus_servo` | UART bus-servo stub |
 | `firmwares/rp2040_i2c_pwm` | Internal PWM + I2C/PCA9685 stub |
 | `firmwares/sim` | Host-side Modbus client (dev) |
@@ -52,9 +52,14 @@ builder assigns contiguous Modbus blocks from enabled actuators then sensors.
 
 ## PWM notes
 
+Pimoroni Servo2040 silk `N` is channel `ServoN` → GPIO `N-1` (1→GPIO0 …
+18→GPIO17). Codegen emits `GENERATED_PWM_DEVICES` for **enabled** actuators
+only; disabled silk ports are not claimed or driven.
+
 Milliradian→pulse maps within `min_angle`..`max_angle` (millirad) into duty
 counts. Unit tests cover midpoints and half-step rounding (`no_std`, no
-`f32::round`).
+`f32::round`). Note GPIO0/16 and GPIO1/17 share a PWM slice channel — do not
+enable both ends of a shared pair.
 
 ## Troubleshooting
 

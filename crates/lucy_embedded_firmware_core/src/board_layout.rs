@@ -53,21 +53,19 @@ pub fn parse_servo_channel(channel: &str) -> Option<u8> {
     }
 }
 
-/// RP2040 internal PWM board: `ServoN` → GPIO `5+N` (Servo1→GPIO6 … Servo16→GPIO21).
-///
-/// First six pads (GPIO6–11) match the current wired Servo2040-style layout;
-/// Servo7–16 extend the table deterministically for codegen even if not wired.
+/// RP2040 internal PWM / Pimoroni Servo2040: `ServoN` → GPIO `N-1`
+/// (`Servo1`→GPIO0 … `Servo18`→GPIO17), matching the board silk numbers.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rp2040InternalPwmLayout;
 
 impl Rp2040InternalPwmLayout {
-    pub const SERVO_COUNT: u8 = 16;
+    pub const SERVO_COUNT: u8 = 18;
     pub const ADC_COUNT: u8 = 4;
 
-    /// GPIO for 1-based servo index, or `None` if out of table.
+    /// GPIO for 1-based servo / silk index, or `None` if out of table.
     pub fn servo_gpio(servo_index: u8) -> Option<u8> {
         if (1..=Self::SERVO_COUNT).contains(&servo_index) {
-            Some(5 + servo_index)
+            Some(servo_index - 1)
         } else {
             None
         }
@@ -174,24 +172,24 @@ mod tests {
             layout.resolve("Servo1"),
             Some(HardwareIdentity::PwmGpio {
                 servo_index: 1,
-                gpio: 6
+                gpio: 0
             })
         );
         assert_eq!(
             layout.resolve("Servo6"),
             Some(HardwareIdentity::PwmGpio {
                 servo_index: 6,
-                gpio: 11
+                gpio: 5
             })
         );
         assert_eq!(
-            layout.resolve("Servo16"),
+            layout.resolve("Servo18"),
             Some(HardwareIdentity::PwmGpio {
-                servo_index: 16,
-                gpio: 21
+                servo_index: 18,
+                gpio: 17
             })
         );
-        assert_eq!(layout.resolve("Servo17"), None);
+        assert_eq!(layout.resolve("Servo19"), None);
         assert_eq!(layout.resolve("Servo0"), None);
     }
 

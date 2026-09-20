@@ -2,6 +2,7 @@ board_id: rp2040_so_arm
 board: rp2040
 board_class: bus_servo_only
 slave_address: 1
+serial_id: ""
 firmware_crate: firmwares/rp2040_bus_servo
 actuators:
   - id: rotation
