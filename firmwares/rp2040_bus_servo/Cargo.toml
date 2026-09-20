@@ -5,11 +5,15 @@ edition = "2024"
 
 [dependencies]
 lucy_embedded_firmware_core = { path = "../../crates/lucy_embedded_firmware_core" }
+lucy_embedded_firmware_rp2040_support = { path = "../../crates/rp2040_support" }
 cortex-m = "0.7.9"
 cortex-m-rt = "0.7.6"
+embedded-hal = "1.0.0"
 panic-halt = "1.0.0"
 rp2040-boot2 = "0.3.0"
 rp2040-hal = { version = "0.11.0", features = ["rt", "critical-section-impl"] }
+usb-device = "0.3.2"
+usbd-serial = "0.2.2"
 
 [build-dependencies]
 builder = { path = "../../crates/builder/" }

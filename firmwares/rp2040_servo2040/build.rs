@@ -1,4 +1,9 @@
 //! Resolve board YAML for codegen and write `$OUT_DIR/config.rs` + `memory.x`.
+//!
+//! Config search order:
+//! 1. `LUCY_FIRMWARE_CONFIG` (absolute path to a board YAML)
+//! 2. Crate-local `config.yaml` (pipeline install target; gitignored)
+//! 3. Empty stub when neither is present / YAML has no `actuators:`
 use std::env;
 use std::fs::File;
 use std::io::Write;
@@ -19,10 +24,8 @@ fn main() {
     println!("cargo:rerun-if-changed=config.yaml");
 
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    println!(
-        "cargo:rerun-if-changed={}",
-        manifest.join("../../config").display()
-    );
+    let workspace_config = manifest.join("../../config");
+    println!("cargo:rerun-if-changed={}", workspace_config.display());
 
     if let Some(path) = resolve_config_path(&manifest) {
         if let Ok(contents) = std::fs::read_to_string(&path) {

@@ -10,6 +10,10 @@ fn compute_checksum(payload: &[u8]) -> u8 {
 }
 
 /// Bus-servo configuration. Angle fields are **milliradians** (`rad × 1000`).
+///
+/// `min_pulse`/`max_pulse` are STS3215 position ticks (typically 0..4095), not
+/// PWM duty counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusServoConfig {
     pub min_pulse: u16,
     pub max_pulse: u16,

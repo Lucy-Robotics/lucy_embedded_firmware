@@ -2,14 +2,11 @@
 #![no_main]
 
 mod board_layout;
-mod channel;
 mod config;
-mod generated_config;
-mod picotool_reset;
 mod pwm_bank;
 
 use config::{GENERATED_PWM_DEVICES, GENERATED_SLAVE_ADDRESS, GENERATED_USB_SERIAL_ID};
-use picotool_reset::PicoToolReset;
+use lucy_embedded_firmware_rp2040_support::PicoToolReset;
 use pwm_bank::PwmBank;
 
 use lucy_embedded_firmware_core::modbus::{
@@ -34,12 +31,6 @@ use ws2812_pio::Ws2812;
 
 use cortex_m_rt::entry;
 use panic_halt as _;
-
-// Legacy modules kept so the crate still builds; PWM path no longer uses them.
-#[allow(unused_imports)]
-use channel as _;
-#[allow(unused_imports)]
-use generated_config as _;
 
 #[unsafe(link_section = ".boot2")]
 #[unsafe(no_mangle)]

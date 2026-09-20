@@ -7,6 +7,8 @@ use crate::{
 /// PWM hobby-servo configuration.
 ///
 /// Angle fields are **milliradians** (`rad × 1000`) after codegen from radian YAML.
+/// Mechanical range comes from YAML `min_angle`/`max_angle` (host `servo_type`
+/// is `180` | `270` | `300` only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -21,11 +23,12 @@ pub struct PwmServoConfig {
     pub default_angle: u16,
 }
 
-/// Servo class tagged by mechanical amplitude in milliradians (π ≈ 3142 for 180°).
-pub type PwmServo90Driver<C> = PwmServoDriver<1571, C>;
+/// Servo class tagged by mechanical amplitude in milliradians.
+/// Matches host `servo_type`: 180° / 270° / 300° (π ≈ 3142 for 180°).
 pub type PwmServo180Driver<C> = PwmServoDriver<3142, C>;
 pub type PwmServo270Driver<C> = PwmServoDriver<4712, C>;
-pub type PwmServo360Driver<C> = PwmServoDriver<6283, C>;
+/// 300° ≈ 300 × π/180 ≈ 5.236 rad → 5236 millirad.
+pub type PwmServo300Driver<C> = PwmServoDriver<5236, C>;
 
 pub struct PwmServoDriver<const A: u16, C> {
     pub config: PwmServoConfig,

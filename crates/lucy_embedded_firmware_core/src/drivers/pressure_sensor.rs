@@ -1,12 +1,11 @@
-//! Pressure sensor driver + Modbus adapter (2 registers: cmd + value).
+//! Pressure sensor Modbus placeholder (2 registers: cmd + value).
+//!
+//! Real ADC sampling is not wired yet. Config codegen still emits
+//! [`PressureSensorConfig`] and reserves register blocks so firmware builds
+//! when YAML lists pressure sensors. The adapter clears `cmd` and leaves
+//! `value` at the last placeholder reading (0 until a future ADC driver).
 
 use crate::modbus::{ModbusAdapter, RegisterView};
-
-/// ADC sample source used by [`PressureSensorDriver`].
-pub trait AdcChannel {
-    type Error;
-    fn read(&mut self) -> Result<u16, Self::Error>;
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -16,16 +15,25 @@ pub struct PressureSensorConfig {
     pub max_value: u16,
 }
 
-pub struct PressureSensorDriver<C> {
+/// Placeholder driver — no hardware ADC until sensors are implemented.
+pub struct PressureSensorDriver {
     pub config: PressureSensorConfig,
-    pub channel: C,
     pub last_value: u16,
 }
 
-impl<C: AdcChannel> PressureSensorDriver<C> {
-    pub fn read(&mut self) -> u16 {
-        let raw = self.channel.read().unwrap_or(self.last_value);
-        let clamped = raw.clamp(self.config.min_value, self.config.max_value);
+impl PressureSensorDriver {
+    pub fn new(config: PressureSensorConfig) -> Self {
+        Self {
+            config,
+            last_value: 0,
+        }
+    }
+
+    /// Returns the last placeholder value (clamped to config range).
+    pub fn read_placeholder(&mut self) -> u16 {
+        let clamped = self
+            .last_value
+            .clamp(self.config.min_value, self.config.max_value);
         self.last_value = clamped;
         clamped
     }
@@ -33,25 +41,22 @@ impl<C: AdcChannel> PressureSensorDriver<C> {
 
 /// Holding registers: `[cmd, value]`.
 ///
-/// - cmd `1` = sample ADC into `value`
-/// - value is read-only from the host (written by the adapter)
-pub struct PressureSensorModbusAdapter<C> {
+/// - cmd `1` = refresh placeholder into `value` (no ADC yet)
+/// - value is written by the adapter for host reads
+pub struct PressureSensorModbusAdapter {
     pub base_register: u16,
     pub cmd_reg_off: u16,
     pub value_reg_off: u16,
-    pub driver: PressureSensorDriver<C>,
+    pub driver: PressureSensorDriver,
 }
 
-impl<C: AdcChannel> ModbusAdapter for PressureSensorModbusAdapter<C> {
+impl ModbusAdapter for PressureSensorModbusAdapter {
     fn tick(&mut self, rv: &RegisterView) {
         let cmd = rv.read_register(self.cmd_reg_off);
         rv.write_register(self.cmd_reg_off, 0);
-        match cmd {
-            1 => {
-                let value = self.driver.read();
-                rv.write_register(self.value_reg_off, value);
-            }
-            _ => {}
+        if cmd == 1 {
+            let value = self.driver.read_placeholder();
+            rv.write_register(self.value_reg_off, value);
         }
     }
 
@@ -69,37 +74,21 @@ mod tests {
     use super::*;
     use crate::modbus::RegisterTable;
 
-    struct FakeAdc {
-        value: u16,
-    }
-
-    impl AdcChannel for FakeAdc {
-        type Error = ();
-        fn read(&mut self) -> Result<u16, Self::Error> {
-            Ok(self.value)
-        }
-    }
-
     #[test]
     fn pressure_block_size_is_two() {
         let mut adapter = PressureSensorModbusAdapter {
             base_register: 4,
             cmd_reg_off: 0,
             value_reg_off: 1,
-            driver: PressureSensorDriver {
-                config: PressureSensorConfig {
-                    min_value: 0,
-                    max_value: 4095,
-                },
-                channel: FakeAdc { value: 1234 },
-                last_value: 0,
-            },
+            driver: PressureSensorDriver::new(PressureSensorConfig {
+                min_value: 0,
+                max_value: 4095,
+            }),
         };
         assert_eq!(adapter.get_nb_register(), 2);
         assert_eq!(adapter.get_base_register(), 4);
 
         let rt = RegisterTable::default();
-        // Seed cmd=1 at absolute register 4
         rt.registers[4].set(1);
         let rv = RegisterView {
             table: &rt,
@@ -108,21 +97,20 @@ mod tests {
         };
         adapter.tick(&rv);
         assert_eq!(rt.registers[4].get(), 0);
-        assert_eq!(rt.registers[5].get(), 1234);
+        assert_eq!(rt.registers[5].get(), 0);
     }
 
     #[test]
-    fn clamps_to_config_range() {
+    fn placeholder_clamps_stored_value() {
         let mut driver = PressureSensorDriver {
             config: PressureSensorConfig {
                 min_value: 100,
                 max_value: 200,
             },
-            channel: FakeAdc { value: 999 },
-            last_value: 0,
+            last_value: 999,
         };
-        assert_eq!(driver.read(), 200);
-        driver.channel.value = 50;
-        assert_eq!(driver.read(), 100);
+        assert_eq!(driver.read_placeholder(), 200);
+        driver.last_value = 50;
+        assert_eq!(driver.read_placeholder(), 100);
     }
 }

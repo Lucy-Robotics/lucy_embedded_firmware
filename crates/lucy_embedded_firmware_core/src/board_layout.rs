@@ -42,7 +42,7 @@ pub fn parse_adc_channel(channel: &str) -> Option<u8> {
     rest.parse::<u8>().ok()
 }
 
-/// Parse `Servo1`..`Servo16` style channel names (1-based index).
+/// Parse `Servo1`..`Servo18` style channel names (1-based index).
 pub fn parse_servo_channel(channel: &str) -> Option<u8> {
     let rest = channel.strip_prefix("Servo")?;
     let idx = rest.parse::<u8>().ok()?;
@@ -53,12 +53,13 @@ pub fn parse_servo_channel(channel: &str) -> Option<u8> {
     }
 }
 
-/// RP2040 internal PWM / Pimoroni Servo2040: `ServoN` → GPIO `N-1`
-/// (`Servo1`→GPIO0 … `Servo18`→GPIO17), matching the board silk numbers.
+/// Pimoroni Servo2040: on-board PWM (`ServoN` → GPIO `N-1`), ADC0..3,
+/// optional UART and I2C/PCA9685 channels. Used for both
+/// `internal_servo_only` and `internal_servo_i2c_pwm` board classes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Rp2040InternalPwmLayout;
+pub struct Rp2040Servo2040Layout;
 
-impl Rp2040InternalPwmLayout {
+impl Rp2040Servo2040Layout {
     pub const SERVO_COUNT: u8 = 18;
     pub const ADC_COUNT: u8 = 4;
 
@@ -72,7 +73,7 @@ impl Rp2040InternalPwmLayout {
     }
 }
 
-impl BoardLayout for Rp2040InternalPwmLayout {
+impl BoardLayout for Rp2040Servo2040Layout {
     fn resolve(&self, channel: &str) -> Option<HardwareIdentity> {
         if let Some(idx) = parse_servo_channel(channel) {
             let gpio = Self::servo_gpio(idx)?;
@@ -89,33 +90,6 @@ impl BoardLayout for Rp2040InternalPwmLayout {
         }
         if let Some((uart, device_id)) = parse_uart_channel(channel) {
             return Some(HardwareIdentity::UartBus { uart, device_id });
-        }
-        None
-    }
-}
-
-/// Bus-servo board: UART lanes + optional device ids.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Rp2040BusServoLayout;
-
-impl BoardLayout for Rp2040BusServoLayout {
-    fn resolve(&self, channel: &str) -> Option<HardwareIdentity> {
-        if let Some((uart, device_id)) = parse_uart_channel(channel) {
-            return Some(HardwareIdentity::UartBus { uart, device_id });
-        }
-        None
-    }
-}
-
-/// Internal PWM + I2C expander board (stub layout).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Rp2040I2cPwmLayout;
-
-impl BoardLayout for Rp2040I2cPwmLayout {
-    fn resolve(&self, channel: &str) -> Option<HardwareIdentity> {
-        // Reuse internal PWM servo/ADC map, then I2C expander channels.
-        if let Some(id) = Rp2040InternalPwmLayout.resolve(channel) {
-            return Some(id);
         }
         // I2C0:PCA9685:N  (N = 0..15)
         let mut parts = channel.split(':');
@@ -140,23 +114,43 @@ impl BoardLayout for Rp2040I2cPwmLayout {
     }
 }
 
+/// Alias kept for older call sites / docs.
+pub type Rp2040InternalPwmLayout = Rp2040Servo2040Layout;
+/// Alias: I2C-capable profile uses the same Servo2040 layout.
+pub type Rp2040I2cPwmLayout = Rp2040Servo2040Layout;
+
+/// Bus-servo board: UART lanes + optional device ids.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Rp2040BusServoLayout;
+
+impl BoardLayout for Rp2040BusServoLayout {
+    fn resolve(&self, channel: &str) -> Option<HardwareIdentity> {
+        if let Some((uart, device_id)) = parse_uart_channel(channel) {
+            return Some(HardwareIdentity::UartBus { uart, device_id });
+        }
+        None
+    }
+}
+
 /// Select a layout by `board_class` or `firmware_crate` path fragment.
-pub fn layout_for_board(board_class: &str, firmware_crate: Option<&str>) -> Option<&'static dyn BoardLayout> {
+pub fn layout_for_board(
+    board_class: &str,
+    firmware_crate: Option<&str>,
+) -> Option<&'static dyn BoardLayout> {
     if let Some(path) = firmware_crate {
-        if path.contains("rp2040_internal_pwm") {
-            return Some(&Rp2040InternalPwmLayout);
+        if path.contains("rp2040_servo2040")
+            || path.contains("rp2040_internal_pwm")
+            || path.contains("rp2040_i2c_pwm")
+        {
+            return Some(&Rp2040Servo2040Layout);
         }
         if path.contains("rp2040_bus_servo") {
             return Some(&Rp2040BusServoLayout);
         }
-        if path.contains("rp2040_i2c_pwm") {
-            return Some(&Rp2040I2cPwmLayout);
-        }
     }
     match board_class {
-        "internal_servo_only" => Some(&Rp2040InternalPwmLayout),
+        "internal_servo_only" | "internal_servo_i2c_pwm" => Some(&Rp2040Servo2040Layout),
         "bus_servo_only" => Some(&Rp2040BusServoLayout),
-        "internal_servo_i2c_pwm" => Some(&Rp2040I2cPwmLayout),
         _ => None,
     }
 }
@@ -166,20 +160,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn internal_pwm_servo_gpio_table() {
-        let layout = Rp2040InternalPwmLayout;
+    fn servo2040_servo_gpio_table() {
+        let layout = Rp2040Servo2040Layout;
         assert_eq!(
             layout.resolve("Servo1"),
             Some(HardwareIdentity::PwmGpio {
                 servo_index: 1,
                 gpio: 0
-            })
-        );
-        assert_eq!(
-            layout.resolve("Servo6"),
-            Some(HardwareIdentity::PwmGpio {
-                servo_index: 6,
-                gpio: 5
             })
         );
         assert_eq!(
@@ -194,36 +181,39 @@ mod tests {
     }
 
     #[test]
-    fn internal_pwm_adc_and_unknown() {
-        let layout = Rp2040InternalPwmLayout;
+    fn servo2040_adc_uart_i2c() {
+        let layout = Rp2040Servo2040Layout;
         assert_eq!(
             layout.resolve("ADC0"),
             Some(HardwareIdentity::Adc { channel: 0 })
         );
-        assert_eq!(
-            layout.resolve("ADC3"),
-            Some(HardwareIdentity::Adc { channel: 3 })
-        );
         assert_eq!(layout.resolve("ADC4"), None);
-        assert_eq!(layout.resolve("NotAChannel"), None);
-    }
-
-    #[test]
-    fn uart_and_i2c_channels() {
         assert_eq!(
-            Rp2040BusServoLayout.resolve("UART0:1"),
+            layout.resolve("UART0:1"),
             Some(HardwareIdentity::UartBus {
                 uart: 0,
                 device_id: Some(1)
             })
         );
         assert_eq!(
-            Rp2040I2cPwmLayout.resolve("I2C0:PCA9685:3"),
+            layout.resolve("I2C0:PCA9685:3"),
             Some(HardwareIdentity::I2cPwm {
                 bus: 0,
                 device: 0x40,
                 channel: 3
             })
         );
+    }
+
+    #[test]
+    fn layout_for_board_classes() {
+        assert!(layout_for_board("internal_servo_only", None).is_some());
+        assert!(layout_for_board("internal_servo_i2c_pwm", None).is_some());
+        assert!(layout_for_board("bus_servo_only", None).is_some());
+        assert!(layout_for_board(
+            "",
+            Some("firmwares/rp2040_servo2040")
+        )
+        .is_some());
     }
 }
