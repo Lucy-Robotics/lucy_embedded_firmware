@@ -1,5 +1,5 @@
 [package]
-name = "lucy_embedded_firmware_rp2040"
+name = "lucy-embedded-firmware-rp2040"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,7 +10,7 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
-lucy_embedded_firmware_core = { path = "../../crates/lucy_embedded_firmware_core" }
+lucy-embedded-firmware-core = { path = "../../crates/core" }
 cortex-m = "0.7.9"
 cortex-m-rt = "0.7.6"
 embedded-hal = "1.0.0"

@@ -1,27 +1,98 @@
 use crate::{serial::SerialChannel};
 use crate::link::{Link, Connected, Disconnected};
-use crate::actuators::{*};
+use crate::actuator::{*};
+use crate::joint::{*};
 use crate::{utils::map_range};
 use core::f32::consts::{TAU, PI};
+
+// === Request builder ===
+
+struct RequestBuilder<const S: usize> {
+    id: u8,
+    instruction: u8,
+    register: u8,
+    payload: [u8; S],
+}
+
+impl<const S: usize> RequestBuilder<S> {
+    fn new() -> Self {
+        RequestBuilder {
+            id: 0,
+            instruction: 0,
+            register: 0,
+            payload: [0; S],
+        }
+    }
+
+    fn set_id(self, id: u8) -> Self {
+        RequestBuilder {
+            id,
+            ..self
+        }
+    }
+
+    fn set_instruction(self, instruction: u8) -> Self {
+        RequestBuilder {
+            instruction,
+            ..self
+        }
+    }
+
+    fn set_register(self, register: u8) -> Self {
+        RequestBuilder {
+            register,
+            ..self
+        }
+    }
+
+    fn set_payload(self, payload: [u8; S]) -> Self {
+        RequestBuilder {
+            payload,
+            ..self
+        }
+    }
+
+    fn build<const N: usize>(self) -> [u8; N] {
+        let length = S as u8;
+        const { assert!(N == S + 7, "N != S + 7") };
+
+        let mut frame = [0u8; N];
+        frame[0] = 0xFF;
+        frame[1] = 0xFF;
+        frame[2] = self.id;
+        frame[3] = length;
+        frame[4] = self.instruction;
+        frame[5] = self.register;
+        frame[6..6 + S].copy_from_slice(&self.payload);
+
+        let checksum = compute_checksum(&frame[2..6 + S]);
+        frame[6 + S] = checksum;
+
+        frame
+    }
+}
 
 fn compute_checksum(payload: &[u8]) -> u8 {
     let sum: u8 = payload.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
     !sum
 }
 
-pub struct BusServoConfig {
+
+
+
+
+// === Individual servo
+
+struct BusServoConfig {
     pub id: u8,
     pub amplitude: f64,
-    pub min_angle: f64,
-    pub max_angle: f64,
-    pub default_angle: f64,
     pub min_pulse: u16,
     pub max_pulse: u16,
 }
 
-impl Default for BusServoConfig {
+impl Default for SlotServoConfig {
     fn default() -> Self {
-        BusServoConfig {
+        SlotServoConfig {
             id: 1,
             amplitude: TAU as f64,
             min_angle: 0.0,
@@ -33,8 +104,15 @@ impl Default for BusServoConfig {
     }
 }
 
+
+pub struct BusServoConfig {
+    pub servos: &'static [SlotServoConfig],
+}
+
 const INST_READ: u8 = 0x02;
 const INST_WRITE: u8 = 0x03;
+const SYNC_READ: u8 = 0x82;
+const SYNC_WRITE: u8 = 0x83;
 
 pub struct BusServoDriver<'cfg, 'bus, C: SerialChannel> {
     pub config: &'cfg BusServoConfig,
@@ -46,47 +124,37 @@ pub enum BusServoError {
     CommunicationError,
 }
 
-impl<'cfg, 'bus, C: SerialChannel> JointTrajectoryInterface for BusServoDriver<'cfg, 'bus, C> {
-    type Error = BusServoError;
+impl<'cfg, 'bus, C: SerialChannel> BusServoDriver<'cfg, 'bus, C> {
+    fn set_joint_trajectory<const N: usize>(&mut self, targets: &[JointTrajectoryPoint]) -> Result<(), BusServoError> {
+        let mut payload = [0u8; N * 7];
+        for servo in self.config.servos.iter() {
+            let position = jtp.position.clamp(servo.min_angle as f64, servo.max_angle as f64);
+            let time: u16 = 0;
+            let velocity: u16 = jtp.velocity as u16;
 
-    fn set_joint_trajectory(&mut self, joint_trajectory_point: JointTrajectoryPoint) -> Result<(), Self::Error> {
-        let position = joint_trajectory_point.position.clamp(self.config.min_angle as f64, self.config.max_angle as f64);
-        let time: u16 = 0;
-        let velocity: u16 = joint_trajectory_point.velocity as u16;
+            let pulse = (map_range(
+                position as f64,
+                0 as f64,
+                servo.amplitude,
+                servo.min_pulse as f64,
+                servo.max_pulse as f64,
+            ) + 0.5) as u16;
 
-        let pulse = (map_range(
-            position as f64,
-            0 as f64,
-            self.config.amplitude,
-            self.config.min_pulse as f64,
-            self.config.max_pulse as f64,
-        ) + 0.5) as u16;
+            let [pos_l, pos_h] = pulse.to_le_bytes();
+            let [time_l, time_h] = time.to_le_bytes();
+            let [spd_l, spd_h] = velocity.to_le_bytes();
+            let payload = [servo.id, pos_l, pos_h, time_l, time_h, spd_l, spd_h];
+        }
 
         const REG_TARGET_POSITION: u8 = 0x2A;
 
-        let [pos_l, pos_h] = pulse.to_le_bytes();
-        let [time_l, time_h] = time.to_le_bytes();
-        let [spd_l, spd_h] = velocity.to_le_bytes();
-        let length = 9u8;
 
-        let mut frame = [
-            0xFF,
-            0xFF,
-            self.config.id,
-            length,
-            INST_WRITE,
-            REG_TARGET_POSITION,
-            pos_l,
-            pos_h,
-            time_l,
-            time_h,
-            spd_l,
-            spd_h,
-            0x00
-        ];
-        let payload_to_sum = &frame[2..frame.len() - 1];
-        let checksum = compute_checksum(payload_to_sum);
-        frame[frame.len() - 1] = checksum;
+        let frame: [u8; 13] = RequestBuilder::new()
+            .set_id(0xFE)
+            .set_instruction(SYNC_WRITE)
+            .set_register(REG_TARGET_POSITION)
+            .set_payload(payload)
+            .build();
 
         self.link.channel
             .clear()
@@ -109,26 +177,17 @@ impl<'cfg, 'bus, C: SerialChannel> TorqueEnableInterface for BusServoDriver<'cfg
 
     fn set_torque_enable(&mut self, state: TorqueStatus) -> Result<(), Self::Error>{
         const REG_TORQUE_ENABLE: u8 = 0x28;
-        let length = 4u8;
         let value = match state {
             TorqueStatus::Enabled => 1u8,
             TorqueStatus::Disabled => 0u8,
         };
 
-        let mut frame = [
-            0xFF,
-            0xFF,
-            self.config.id,
-            length,
-            INST_WRITE,
-            REG_TORQUE_ENABLE,
-            value,
-            0x00,
-        ];
-
-        let payload_to_sum = &frame[2..frame.len() - 1];
-        let checksum = compute_checksum(payload_to_sum);
-        frame[frame.len() - 1] = checksum;
+        let frame: [u8; 8] = RequestBuilder::new()
+            .set_id(self.config.id)
+            .set_instruction(INST_WRITE)
+            .set_register(REG_TORQUE_ENABLE)
+            .set_payload([value])
+            .build();
 
         self.link.channel
             .clear()
@@ -142,6 +201,7 @@ impl<'cfg, 'bus, C: SerialChannel> TorqueEnableInterface for BusServoDriver<'cfg
         self.link.channel
             .read(&mut echo_frame)
             .map_err(|_| BusServoError::CommunicationError)?;
+
         Ok(())
     }
 }
@@ -295,5 +355,57 @@ impl<'cfg, 'bus, C: SerialChannel> TorqueInterface for BusServoDriver<'cfg, 'bus
         let torque = sign * magnitude;
 
         Ok(torque)
+    }
+}
+
+
+
+
+
+impl<'cfg, 'bus, C: SerialChannel> BusServoPortDriver<'cfg, 'bus, C> {
+
+    fn set_joint_trajectory(&mut self, jtp: JointTrajectoryPoint) -> Result<(), BusServoError> {
+
+        let payload = [0u8; 3];
+        let position = 0;
+        for servo in self.config.servos.iter() {
+            let pulse = (map_range(
+                position as f64,
+                0 as f64,
+                servo.config.amplitude,
+                servo.config.min_pulse as f64,
+                servo.config.max_pulse as f64,
+            ) + 0.5) as u16;
+            let time: u16 = 0;
+            let velocity: u16 = jtp.velocity as u16;
+        }
+
+        const REG_TARGET_POSITION: u8 = 0x2A;
+
+        let [pos_l, pos_h] = pulse.to_le_bytes();
+        let [time_l, time_h] = time.to_le_bytes();
+        let [spd_l, spd_h] = velocity.to_le_bytes();
+        let payload = [pos_l, pos_h, time_l, time_h, spd_l, spd_h];
+
+        let frame: [u8; 13] = RequestBuilder::new()
+            .set_id(self.config.id)
+            .set_instruction(INST_WRITE)
+            .set_register(REG_TARGET_POSITION)
+            .set_payload(payload)
+            .build();
+
+        self.link.channel
+            .clear()
+            .map_err(|_| BusServoError::CommunicationError)?;
+
+        self.link.channel
+            .write(&frame)
+            .map_err(|_| BusServoError::CommunicationError)?;
+
+        let mut echo_frame = [0u8; 8];
+        self.link.channel
+            .read(&mut echo_frame)
+            .map_err(|_| BusServoError::CommunicationError)?;
+        Ok(())
     }
 }

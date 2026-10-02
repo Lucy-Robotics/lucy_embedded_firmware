@@ -1,5 +1,5 @@
 [package]
-name = "lucy_embedded_firmware_core"
+name = "lucy-embedded-firmware-core"
 version = "0.1.0"
 edition = "2024"
 

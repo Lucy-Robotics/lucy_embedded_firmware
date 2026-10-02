@@ -1,0 +1,21 @@
+[[bin]]
+name = "lucy-embedded-firmware-linux"
+path = "src/main.rs"
+
+[package]
+name = "lucy-embedded-firmware-linux"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lucy-embedded-firmware-core = { path = "../../crates/core" }
+#lucy-embedded-firmware-pwm = { path = "../../crates/pwm" }
+lucy-embedded-firmware-feetech = { path = "../../crates/feetech" }
+crc = "3.4.0"
+modbus-core = "0.2.0"
+serialport = "4.10.0"
+memmap2 = "0.9.11"
+libc = "0.2.189"
+zerocopy = "0.8.57"
+bytemuck = "1.25.2"
+heapless = "0.9.3"

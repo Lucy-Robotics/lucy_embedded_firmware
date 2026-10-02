@@ -1,99 +1,27 @@
-use std::io::{Read, Write};
-use std::io;
 use std::fs::File;
-use std::fmt;
 use std::time::Duration;
-use core::cell::Cell;
-use serialport::{SerialPortType, UsbPortInfo};
-
-use lucy_embedded_firmware_core::data::{ActuatorSharedState};
-use lucy_embedded_firmware_core::actuators::{JointTrajectoryPoint, JointTrajectoryInterface, TorqueStatus, TorqueEnableInterface, JointStateInterface, TemperatureInterface, TorqueInterface};
-use lucy_embedded_firmware_core::link::{Link, AnyLink, Controller};
-use lucy_embedded_firmware_core::serial::SerialChannel;
-use lucy_embedded_firmware_core::drivers::bus_servo::{BusServoDriver, BusServoConfig};
 
 use memmap2::MmapMut;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
+
+use lucy_embedded_firmware_core::data::{JointTable};
+use lucy_embedded_firmware_core::robot::{Robot};
+use lucy_embedded_firmware_feetech::link::{Link, AnyLink, Controller};
+
+use lucy_embedded_firmware_core::joint::{*};
+
+//use lucy_embedded_firmware_pwm::pwm_servo::{PwmServoConfig, PwmServoDriver, PwmServoError};
+use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusDriver};
+//use lucy_embedded_firmware_core::drivers::bus_servo::{BusServoDriver, BusServoConfig};
+//use lucy_embedded_firmware_core::actuator::{JointTrajectoryPoint, JointTrajectoryInterface, TorqueStatus, TorqueEnableInterface, JointStateInterface, TemperatureInterface, TorqueInterface};
+
+use core::f32::consts::TAU;
 
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
-pub struct UsbPort {
-    target_pid: u16,
-    target_vid: u16,
-    baud_rate: u32,
-    port: Option<Box<dyn serialport::SerialPort>>,
-}
-
-impl UsbPort {
-    pub const fn new(target_pid: u16, target_vid: u16, baud_rate: u32) -> Self {
-        Self {
-            target_pid,
-            target_vid,
-            baud_rate,
-            port: None,
-        }
-    }
-}
-
-impl SerialChannel for UsbPort {
-    type Error = std::io::Error;
-
-    fn open(&mut self) -> Result<(), Self::Error> {
-        let ports = serialport::available_ports().unwrap();
-
-        let matching_port = ports.into_iter().find(|p| {
-            if let SerialPortType::UsbPort(UsbPortInfo { vid, pid, .. }) = p.port_type {
-                vid == self.target_vid && pid == self.target_pid
-            } else {
-                false
-            }
-        });
-
-        match matching_port {
-            Some(port_info) => {
-                let port = serialport::new(&port_info.port_name, self.baud_rate)
-                    .timeout(Duration::from_millis(50))
-                    .open()?;
-                self.port = Some(port);
-                Ok(())
-            }
-            None => {
-                Err(io::Error::new(io::ErrorKind::NotFound, "No matching USB"))
-            }
-        }
-    }
-
-    fn close(&mut self) -> Result<(), Self::Error> {
-        self.port = None;
-        Ok(())
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
-        if let Some(port) = &mut self.port {
-            port.write_all(bytes)?;
-        }
-        Ok(())
-    }
-
-    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        if let Some(port) = &mut self.port {
-            let n = port.read_exact(buffer)?;
-            Ok(buffer.len())
-        } else {
-            println!("Error");
-            Ok(0)
-        }
-    }
-
-    fn clear(&mut self) -> Result<(), Self::Error> {
-        if let Some(port) = &mut self.port {
-            port.clear(serialport::ClearBuffer::All)?;
-        }
-        Ok(())
-    }
-}
+mod usb_port;
+use usb_port::UsbPort;
 
 fn node_name() -> String {
     std::env::args()
@@ -124,31 +52,40 @@ fn open_shm(name: &str, min_len: usize) -> File {
     file
 }
 
+fn get_robot() -> Robot<FeetechBusConfig, 6, 6> {
+    Robot {
+        command: [JointCommand::default(); 6],
+        state: [JointState::default(); 6],
+        joint_config: [JointConfig::default(); 6],
+        actuator_config: [
+            FeetechServoConfig { id: 1, ..Default::default() },
+            FeetechServoConfig { id: 2, ..Default::default() },
+            FeetechServoConfig { id: 3, ..Default::default() },
+            FeetechServoConfig { id: 4, ..Default::default() },
+            FeetechServoConfig { id: 5, ..Default::default() },
+            FeetechServoConfig { id: 6, ..Default::default() },
+        ],
+    }
+}
+
 fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
     let shm_file = open_shm(
         &format!("/{node}"),
-        size_of::<ActuatorSharedState>(),
+        size_of::<JointTable<6>>(),
     );
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let ass: &mut ActuatorSharedState = unsafe {
-        &mut *(table_map.as_ptr() as *mut ActuatorSharedState)
+    let ass: &mut JointTable<6> = unsafe {
+        &mut *(table_map.as_ptr() as *mut JointTable<6>)
     };
 
     let target_vid = 0x1a86;
     let target_pid = 0x55d3;
 
-    let robot = [
-        BusServoConfig { id: 1, ..Default::default() },
-        BusServoConfig { id: 2, ..Default::default() },
-        BusServoConfig { id: 3, ..Default::default() },
-        BusServoConfig { id: 4, ..Default::default() },
-        BusServoConfig { id: 5, ..Default::default() },
-        BusServoConfig { id: 6, ..Default::default() },
-    ];
+    let robot = get_robot();
 
     let last_command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
     let last_state_seq = ass.states.state_seq.load(core::sync::atomic::Ordering::SeqCst);
@@ -169,13 +106,15 @@ fn main() {
 
         controller.tick();
 
+        robot.sync_write(&ass.commands);
+        robot.sync_read(&mut ass.states);
+
         let command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
         let state_seq = ass.states.state_seq.load(core::sync::atomic::Ordering::SeqCst);
 
         let link = controller.link.as_mut().unwrap().as_connected_mut().unwrap();
 
-
-        if command_seq != last_command_seq {
+        if (command_seq % 2) == 0 && command_seq != last_command_seq {
             for (index, config) in robot.iter().enumerate() {
                 let mut driver = BusServoDriver {
                     config: &config,
@@ -187,7 +126,7 @@ fn main() {
                     acceleration: ass.commands.hw_accelerations[index],
                 };
                 let torque_status = TorqueStatus::from(ass.commands.hw_torque_enabled[index]);
-                if (torque_status == TorqueStatus::Enabled) {
+                if torque_status == TorqueStatus::Enabled {
                     driver.set_joint_trajectory(joint_trajectory_point);
                 }
                 driver.set_torque_enable(torque_status);

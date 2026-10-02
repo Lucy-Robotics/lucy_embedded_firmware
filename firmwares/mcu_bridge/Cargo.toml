@@ -1,10 +1,10 @@
 [package]
-name = "lucy_embedded_firmware_sim"
+name = "lucy-embedded-firmware-mcu-bridge"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lucy_embedded_firmware_core = { path = "../../crates/lucy_embedded_firmware_core" }
+lucy-embedded-firmware-core = { path = "../../crates/lucy_embedded_firmware_core" }
 crc = "3.4.0"
 modbus-core = "0.2.0"
 serialport = "4.10.0"
