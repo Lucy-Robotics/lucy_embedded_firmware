@@ -22,7 +22,7 @@ impl PressureSensorModBusAdapter {
 }
 
 impl ModbusAdapter for PressureSensorModBusAdapter {
-    fn tick(&mut self, view: &mut RegisterView) {
+    fn tick(&mut self, view: &RegisterView) {
         let command: u16 = view.read_register(self.cmd_reg_off);
         if command == 1 {
 

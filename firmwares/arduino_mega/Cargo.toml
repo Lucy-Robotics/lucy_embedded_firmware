@@ -13,6 +13,7 @@ test = false
 bench = false
 
 [dependencies]
+lucy_embedded_firmware_core = { path = "../../crates/lucy_embedded_firmware_core" }
 panic-halt = "1.0.0"
 ufmt = "0.2.0"
 nb = "1.1.0"

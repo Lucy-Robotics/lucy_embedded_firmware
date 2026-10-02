@@ -14,7 +14,7 @@ pub struct PCA9685Driver {
 }
 
 impl ModbusAdapter for PCA9685Driver {
-    fn tick(&mut self, view: &mut RegisterView)  {
+    fn tick(&mut self, view: &RegisterView)  {
     }
 
     fn get_nb_register(&self) -> u16 {

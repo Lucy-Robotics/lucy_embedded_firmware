@@ -41,7 +41,7 @@ impl<const A: u16, C: PwmChannel> PwmServoDriver<A, C> {
     }
 
     pub fn reset_angle(&mut self) {
-        self.move_to_angle(self.config.default_angle);
+        self.move_angle(self.config.default_angle);
     }
 }
 
@@ -61,7 +61,7 @@ impl<const A: u16, C: PwmChannel> ModbusAdapter for PwmServoModbusAdapter<A, C> 
         match cmd {
             1 => {
                 let angle = rv.read_register(self.angle_reg_off);
-                self.driver.move_to_angle(angle);
+                self.driver.move_angle(angle);
             },
             2 => {
                 self.driver.reset_angle();

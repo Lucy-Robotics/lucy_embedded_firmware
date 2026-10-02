@@ -7,41 +7,65 @@ use embedded_hal::{
     pwm::SetDutyCycle,
 };
 
-use rp2040_hal::{
-    fugit::RateExtU32,
-    fugit::MicrosDuration,
-    clocks::init_clocks_and_plls,
-    gpio::{bank0, Pins, FunctionPio0, FunctionPwm, FunctionI2C, PullUp},
-    pac,
-    i2c::I2C,
-    pwm::{Slices, AnySlice, Slice, SliceId, Channel, ChannelId, FreeRunning, A, B},
-    pio::PIOExt,
-    sio::Sio,
-    timer::Timer,
-    watchdog::Watchdog,
-    Clock
-};
-
 pub enum ChannelError {
 
 }
 
-pub struct ArduinoMega2560PwmChannel<C> 
-where
-    C: SetDutyCycle,
+pub struct ArduinoMega2560PwmChannel
 {
-    pub channel: C
+    // Timer / Counter 1, works only for certain pins
+    pub tc1: arduino_hal::pac::TC1
 }
 
-impl<C> PwmChannel for ArduinoMega2560PwmChannel<C>
-where
-    C: SetDutyCycle,
+impl ArduinoMega2560PwmChannel 
+{
+    pub fn new(tc1: arduino_hal::pac::TC1) -> Self {
+        unsafe {
+            tc1.tccr1a()
+                .write(|w| w.wgm1().bits(0b10).com1a().match_clear());
+
+            tc1.icr1()
+                .write(|w| w.bits(39999));   // TOP first
+            
+            tc1.ocr1a()
+                .write(|w| w.bits(3000));   // 1.5 ms = centre, valid from the start
+
+            tc1.tccr1b()
+                .write(|w| w.wgm1().bits(0b11).cs1().prescale_8()); // start the timer last
+    }
+
+        Self { tc1 }
+    }
+
+    fn enable_output(&mut self) {
+        self.tc1.tccr1a().modify(|_, w| w.com1a().match_clear());
+    }
+
+    /// Stop sending pulses: the servo goes limp and stops drawing current.
+    pub fn release(&mut self) {
+        self.tc1.tccr1a().modify(|_, w| w.com1a().disconnected());
+    }
+
+    pub fn set_angle(&mut self, angle: u16) {
+        let angle = angle.min(180);
+        let pulse = 2000 + (angle as u32 * 2000 / 180) as u16;
+
+        self.set_pwm(pulse);
+    }
+
+}
+
+impl PwmChannel for ArduinoMega2560PwmChannel
 {
     type Error = ChannelError;
 
-    fn set_pwm(&mut self, pulse: u16) -> Result<(), ChannelError> {
-        self.channel.set_duty_cycle(pulse);
+    fn set_pwm(&mut self, pulse: u16) -> Result<(), ChannelError> {    
+        unsafe {
+            self.tc1.ocr1a().write(|w| w.bits(pulse));
+        }
+
+        self.enable_output();
+
         Ok(())
     }
 }
-
