@@ -1,0 +1,16 @@
+[workspace]
+members = ["crates/*", "firmwares/*"]
+# Host `cargo test` / default builds: library crates only. RP2040 firmwares need
+# --target thumbv6m-none-eabi; sim pulls serialport→libudev on Linux.
+default-members = ["crates/*"]
+resolver = "2"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[workspace.dependencies]
+# Shared dependencies - versions defined once
+modbus-core = { version = "0.3", default-features = false }

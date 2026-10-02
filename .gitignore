@@ -27,3 +27,9 @@ Cargo.lock
 #.idea/
 
 *.uf2
+
+# Generated / pipeline-installed board configs (source of truth: robot package → pipeline).
+# Canonical copies live under config/config_<board_id>.yaml; build copies into the crate.
+config/*
+!config/README.md
+firmwares/*/config.yaml
