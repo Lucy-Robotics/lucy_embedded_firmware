@@ -1,0 +1,38 @@
+[workspace]
+
+[package]
+name = "firmware-arduino-mega"
+version = "0.1.0"
+authors = ["Voxelle"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "firmware-arduino-mega"
+test = false
+bench = false
+
+[dependencies]
+lucy_embedded_firmware_core = { path = "../../crates/lucy_embedded_firmware_core" }
+panic-halt = "1.0.0"
+ufmt = "0.2.0"
+nb = "1.1.0"
+embedded-hal = "1.0"
+
+[dependencies.arduino-hal]
+git = "https://github.com/rahix/avr-hal"
+branch = "main"
+features = ["arduino-mega2560"]
+
+# Configure the build for minimal size - AVRs have very little program memory
+[profile.dev]
+panic = "abort"
+lto = true
+opt-level = "s"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "s"

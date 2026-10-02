@@ -9,6 +9,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 crc = "3.4.0"
+embedded-hal = "1.0.0"
 modbus-core = "0.2.0"
 serde = { version =  "1.0", default-features = false, features = ["derive"], optional = true }
 

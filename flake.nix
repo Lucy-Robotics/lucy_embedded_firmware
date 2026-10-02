@@ -12,27 +12,37 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        target = "thumbv6m-none-eabi";
-        rustToolchain = fenix.packages.${system}.combine [
-          fenix.packages.${system}.stable.cargo
-          fenix.packages.${system}.stable.rustc
-          fenix.packages.${system}.stable.clippy
-          fenix.packages.${system}.stable.rustfmt
-          fenix.packages.${system}.stable.rust-src
-          fenix.packages.${system}.targets.${target}.stable.rust-std
-        ];
       in
       {
         devShells.default = pkgs.mkShell {
           name = "Lucy Embedded Firmware";
           packages = [
-            rustToolchain
+            # Rust itself is NOT provided here — see rust-toolchain.toml in each
+            # firmware crate; rustup will auto-select the right toolchain per
+            # directory (nightly for AVR/build-std, stable for RP2040).
+            pkgs.rustup
+
+            # rustToolchain
             pkgs.udev
             pkgs.systemd
             pkgs.flip-link
             pkgs.probe-rs-tools
+            pkgs.cargo-generate
+
+            # AVR / Arduino tooling
+            pkgs.avrdude
+            pkgs.pkgsCross.avr.buildPackages.gcc   # avr-gcc, for linking against avr-libc
+            pkgs.ravedude
+
+            # shared / testing
+            pkgs.pkg-config
+            pkgs.simavr
             pkgs.elf2uf2-rs
             pkgs.picotool
+
+            # task runner
+            pkgs.just
+
           ];
           nativeBuildInputs = [
             pkgs.pkg-config
@@ -45,8 +55,8 @@
             echo -e ""
             echo -e "🛡️  \033[1;36mLucy Embedded Firmware\033[1;0m"
             echo -e "----------------------------"
-            echo -e "cargo: $(cargo --version  | cut -d ' ' -f2)"
-            echo -e "rustc: $(rustc --version | cut -d ' ' -f2)"
+            echo -e "Rust toolchain: managed by rustup (per-crate rust-toolchain.toml)"
+            echo -e "Run 'cargo build' inside firmwares/<target>/ to auto-select the right toolchain."
             echo -e "----------------------------"
           '';
         };
