@@ -275,6 +275,55 @@ sensors:
         assert!(src.contains("PressureSensorConfig"));
         assert!(src.contains("GRIP_PRESSURE_BASE_REGISTER"));
         assert!(src.contains("GENERATED_PWM_DEVICE_COUNT : usize = 0usize"));
+        assert!(src.contains("GENERATED_ADC_DEVICE_COUNT : usize = 1usize"));
+        assert!(src.contains("GENERATED_HAS_ADC : bool = true"));
+        assert!(src.contains("channel : 0u8"));
+    }
+
+    #[test]
+    fn i2c_pwm_yaml_codegens_i2c_device_table() {
+        let yaml = r#"
+board_class: internal_servo_i2c_pwm
+firmware_crate: firmwares/rp2040_servo2040
+actuators:
+  - id: ext_servo
+    enabled: true
+    config:
+      min_angle: 0.0
+      max_angle: 3.14
+      default_angle: 1.57
+      min_pulse: 1000
+      max_pulse: 2000
+    hardware: { driver: PwmServoDriver, channel: "I2C0:PCA9685:3" }
+"#;
+        let cfg: FirmwareConfig = serde_yaml::from_str(yaml).unwrap();
+        let plan = plan_config(&cfg).unwrap();
+        assert_eq!(plan.devices.len(), 1);
+        assert!(matches!(
+            plan.devices[0].hardware,
+            HardwareIdentity::I2cPwm {
+                bus: 0,
+                device: 0x40,
+                channel: 3
+            }
+        ));
+        let src = generate_config_tokens(&plan).to_string();
+        assert!(src.contains("GENERATED_I2C_PWM_DEVICE_COUNT : usize = 1usize"));
+        assert!(src.contains("GENERATED_HAS_I2C_PWM : bool = true"));
+        assert!(src.contains("device_addr : 64u8"));
+        assert!(src.contains("channel : 3u8"));
+        assert!(src.contains("GENERATED_PWM_DEVICE_COUNT : usize = 0usize"));
+    }
+
+    #[test]
+    fn sample_yaml_emits_adc_table_alongside_pwm() {
+        let cfg: FirmwareConfig = serde_yaml::from_str(sample_yaml()).unwrap();
+        let plan = plan_config(&cfg).unwrap();
+        let src = generate_config_tokens(&plan).to_string();
+        assert!(src.contains("GENERATED_PWM_DEVICE_COUNT : usize = 1usize"));
+        assert!(src.contains("GENERATED_ADC_DEVICE_COUNT : usize = 1usize"));
+        assert!(src.contains("GENERATED_HAS_PWM : bool = true"));
+        assert!(src.contains("GENERATED_HAS_ADC : bool = true"));
     }
 
     #[test]

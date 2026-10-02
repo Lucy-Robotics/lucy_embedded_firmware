@@ -64,6 +64,10 @@ impl<U: UartChannel> BusBank<U> {
         bank
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
     /// Seed Modbus `id` registers from YAML `UART0:N` device ids.
     pub fn seed_id_registers(&self, rt: &RegisterTable) {
         for i in 0..self.count {

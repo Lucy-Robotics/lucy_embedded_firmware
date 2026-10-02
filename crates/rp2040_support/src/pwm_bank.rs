@@ -78,6 +78,10 @@ impl PwmBank {
         bank
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
     pub fn tick(&self, pwm: &pac::PWM, rt: &RegisterTable) {
         for i in 0..self.count {
             let base = self.base_register[i];
@@ -116,6 +120,12 @@ impl PwmBank {
             }
         }
     }
+}
+
+/// Take PWM block out of reset (call once before [`PwmBank::from_null_pool`]).
+pub fn unreset_pwm(resets: &mut pac::RESETS) {
+    resets.reset().modify(|_, w| w.pwm().clear_bit());
+    while resets.reset_done().read().pwm().bit_is_clear() {}
 }
 
 fn enable_slice(pwm: &pac::PWM, slice: usize) {

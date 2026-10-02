@@ -1,24 +1,20 @@
 //! UART bus-servo RP2040 board (`board_class: bus_servo_only`).
 //!
-//! YAML (`config.yaml` / `LUCY_FIRMWARE_CONFIG`) selects enabled Feetech IDs and
-//! Modbus bases via `GENERATED_BUS_DEVICES`. Hardware pinout matches the SO-ARM
-//! PoC: UART0 TX=GPIO0, RX=GPIO1, DIR=GPIO2 @ 1 Mbaud.
+//! YAML selects enabled Feetech IDs via `GENERATED_BUS_DEVICES`. Pinout:
+//! UART0 TX=GPIO0, RX=GPIO1, DIR=GPIO2 @ 1 Mbaud. Shared bring-up /
+//! banks live in `lucy_embedded_firmware_rp2040_support`.
 #![no_std]
 #![no_main]
 
 mod board_layout;
-mod bus_bank;
-mod uart_channel;
 
 include!(concat!(env!("OUT_DIR"), "/config.rs"));
 
-use bus_bank::{BusBank, BusBankDevice};
-use lucy_embedded_firmware_core::modbus::{
-    inter_frame_delay_us, parse_modbus_frame, route_modbus_request, ModbusError, RegisterTable,
-    Slave,
+use lucy_embedded_firmware_core::modbus::{RegisterTable, Slave};
+use lucy_embedded_firmware_rp2040_support::{
+    build_usb_device, resolve_usb_serial, BusBank, BusBankDevice, ModbusCdcState, Rp2040UartChannel,
+    MAX_BUS_DEVICES,
 };
-use lucy_embedded_firmware_rp2040_support::PicoToolReset;
-use uart_channel::Rp2040UartChannel;
 
 use cortex_m_rt::entry;
 use embedded_hal::digital::OutputPin;
@@ -34,8 +30,7 @@ use rp2040_hal::{
     watchdog::Watchdog,
     Clock,
 };
-use usb_device::{class_prelude::*, prelude::*};
-use usbd_serial::SerialPort;
+use usb_device::class_prelude::*;
 
 #[unsafe(link_section = ".boot2")]
 #[unsafe(no_mangle)]
@@ -94,19 +89,21 @@ fn main() -> ! {
             max_angle: 6283,
             default_angle: 3142,
         },
-    }; bus_bank::MAX_BUS_DEVICES];
+    }; MAX_BUS_DEVICES];
     let mut n = 0usize;
-    for d in GENERATED_BUS_DEVICES.iter().take(bus_bank::MAX_BUS_DEVICES) {
-        // Only UART0 is wired on this board firmware.
-        if d.uart != 0 {
-            continue;
+    if GENERATED_HAS_BUS {
+        for d in GENERATED_BUS_DEVICES.iter().take(MAX_BUS_DEVICES) {
+            // Only UART0 is wired on this board firmware.
+            if d.uart != 0 {
+                continue;
+            }
+            device_buf[n] = BusBankDevice {
+                device_id: d.device_id,
+                base_register: d.base_register,
+                config: d.config,
+            };
+            n += 1;
         }
-        device_buf[n] = BusBankDevice {
-            device_id: d.device_id,
-            base_register: d.base_register,
-            config: d.config,
-        };
-        n += 1;
     }
     let mut bus_bank = BusBank::new(channel, &device_buf[..n]);
 
@@ -117,26 +114,9 @@ fn main() -> ! {
         true,
         &mut pac.RESETS,
     ));
-    let mut serial = SerialPort::new(&usb_bus);
-    let mut picotool = PicoToolReset::new(&usb_bus);
-    let usb_serial = {
-        let s = GENERATED_USB_SERIAL_ID;
-        if s.is_empty() {
-            "TEST"
-        } else {
-            s
-        }
-    };
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x2e8a, 0x000a))
-        .strings(&[StringDescriptors::default()
-            .manufacturer("Sentience")
-            .product("Lucy RP2040 Bus Servo")
-            .serial_number(usb_serial)])
-        .unwrap()
-        .composite_with_iads()
-        .max_packet_size_0(64)
-        .unwrap()
-        .build();
+    let usb_serial = resolve_usb_serial(GENERATED_USB_SERIAL_ID);
+    let (mut serial, mut picotool, mut usb_dev) =
+        build_usb_device(&usb_bus, "Lucy RP2040 Bus Servo", usb_serial);
 
     let slave = Slave {
         address: GENERATED_SLAVE_ADDRESS,
@@ -144,53 +124,12 @@ fn main() -> ! {
     let rt = RegisterTable::default();
     bus_bank.seed_id_registers(&rt);
 
-    let mut rx_buf = [0u8; 256];
-    let mut tx_buf = [0u8; 256];
-    let mut rx_len = 0usize;
-    let mut rx_active_timer = false;
-    let mut last_rx_micros: u64 = 0;
-    let frame_gap_us = inter_frame_delay_us(115_200);
+    let mut modbus = ModbusCdcState::new(115_200);
 
     loop {
         let now = timer.get_counter().ticks();
-
-        if usb_dev.poll(&mut [&mut serial, &mut picotool]) {
-            let mut tmp_buf = [0u8; 64];
-            while let Ok(count) = serial.read(&mut tmp_buf) {
-                if count == 0 {
-                    break;
-                }
-                if rx_len + count <= rx_buf.len() {
-                    rx_buf[rx_len..rx_len + count].copy_from_slice(&tmp_buf[..count]);
-                    rx_len += count;
-                    last_rx_micros = now;
-                    rx_active_timer = true;
-                } else {
-                    rx_active_timer = false;
-                    rx_len = 0;
-                    break;
-                }
-            }
-        }
-
-        if rx_active_timer && (now.wrapping_sub(last_rx_micros) >= frame_gap_us) {
-            rx_active_timer = false;
-            if rx_len >= 4 {
-                match parse_modbus_frame(&slave, &rx_buf[..rx_len]) {
-                    Ok(request) => {
-                        if let Ok(n) =
-                            route_modbus_request(slave.address, &rt, request, &mut tx_buf)
-                        {
-                            let _ = serial.write(&tx_buf[..n]);
-                        }
-                    }
-                    Err(ModbusError::InvalidAddress) => {}
-                    Err(_) => {}
-                }
-            }
-            rx_len = 0;
-        }
-
+        modbus.poll_usb(&mut usb_dev, &mut serial, &mut picotool, now);
+        modbus.try_route_frame(&slave, &rt, &mut serial, now);
         bus_bank.tick(&rt);
     }
 }

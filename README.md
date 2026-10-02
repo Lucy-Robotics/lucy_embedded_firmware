@@ -2,9 +2,13 @@
 
 Rust firmware for Lucy RP2040 boards using **Modbus RTU over USB CDC**.
 
+**Architecture:** [docs/architecture/firmware.md](docs/architecture/firmware.md) ·  
+**Index:** [`lucy_ws/docs/architecture/README.md`](../../docs/architecture/README.md) ·  
+**System overview:** [`lucy_ws/docs/architecture/overview.md`](../../docs/architecture/overview.md)
+
 ## Quick start (Pixi)
 
-From the `lucy_ws` root:
+From the `lucy_ws` root - **no sudo, no manual rustup/PATH config**:
 
 ```bash
 pixi run firmware-setup   # installs rustup (if needed), thumbv6m target, elf2uf2-rs
@@ -19,8 +23,8 @@ pixi run firmware-flash
 |------|------|
 | `crates/lucy_embedded_firmware_core` | `no_std` Modbus + drivers + `BoardLayout` |
 | `crates/builder` | YAML → `$OUT_DIR/config.rs` codegen (auto virtual pins) |
-| `crates/rp2040_support` | Shared RP2040 USB helpers (`PicoToolReset`) |
-| `firmwares/rp2040_servo2040` | Pimoroni Servo2040 — PWM (+ optional I2C/ADC/UART via YAML) |
+| `crates/rp2040_support` | Shared RP2040 bring-up: USB CDC, Modbus poll, PWM / UART / I2C-PWM / ADC banks, `PicoToolReset` |
+| `firmwares/rp2040_servo2040` | Pimoroni Servo2040 - thin main; PWM + I2C-PWM + ADC gated by YAML |
 | `firmwares/rp2040_bus_servo` | UART bus-servo board (Feetech/STS @ UART0 GPIO0/1, DIR GPIO2) |
 | `firmwares/sim` | Host-side Modbus client (dev) |
 | `config/` | **Generated** `config_<board_id>.yaml` (gitignored except README) |
@@ -53,9 +57,9 @@ Modbus bases match `LucySystemHardware`; otherwise the builder assigns densely.
 
 | Driver | Registers |
 |--------|-----------|
-| PwmServo | 2 — cmd, angle (millirad) |
-| BusServo | 3 — id, angle, cmd |
-| PressureSensor | 2 — cmd, value (placeholder until ADC is wired) |
+| PwmServo | 2 - cmd, angle (millirad) |
+| BusServo | 3 - id, angle, cmd |
+| PressureSensor | 2 - cmd, value (placeholder until ADC is wired) |
 
 ## Board class → crate
 
@@ -66,7 +70,10 @@ Modbus bases match `LucySystemHardware`; otherwise the builder assigns densely.
 | `bus_servo_only` | `lucy_embedded_firmware_rp2040_bus_servo` |
 
 One physical Servo2040 board → one firmware binary. YAML enables PWM servos,
-pressure-sensor placeholders, and (later) I2C/UART peripherals.
+I2C/PCA9685 channels (`I2C0:PCA9685:N`), and ADC/pressure placeholders
+(`ADC0`…). Build-time gates `GENERATED_HAS_PWM` / `HAS_I2C_PWM` / `HAS_ADC` /
+`HAS_BUS` select which banks initialize. UART bus servos use the separate
+`rp2040_bus_servo` board package (different pinout).
 
 ## PWM notes
 
@@ -76,7 +83,7 @@ only; disabled silk ports are not claimed or driven.
 
 Host `servo_type` is `180` | `270` | `300` only. Milliradian→pulse maps within
 `min_angle`..`max_angle` (millirad) into duty counts. Note GPIO0/16 and GPIO1/17
-share a PWM slice channel — do not enable both ends of a shared pair.
+share a PWM slice channel - do not enable both ends of a shared pair.
 
 ## Troubleshooting
 
