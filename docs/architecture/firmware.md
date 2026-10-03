@@ -10,7 +10,7 @@ Detail for **`lucy_embedded_firmware`**.
 **UML Component (firmware crates)** - YAML codegen into shared banks and thin board mains.
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"lineColor": "#00FF41", "edgeLabelBackground": "#161b22", "clusterBorder": "#00FF41"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
 flowchart TB
   YAML["config.yaml"] -.-> Builder["builder"]
   Builder -.-> Cfg["GENERATED_tables"]
