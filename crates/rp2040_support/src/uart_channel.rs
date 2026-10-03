@@ -1,7 +1,8 @@
-//! Half-duplex UART channel for Feetech/STS bus servos.
+//! Half-duplex UART channel for bus servos (RP2040 UART0).
 //!
-//! PoC pinout (Servo2040 / SO-ARM adapter): TX=GPIO0, RX=GPIO1, DIR=GPIO2.
-//! DIR high = drive bus; low = listen.
+//! MCU-generic: DIR high while transmitting, low while listening. Board
+//! firmwares own pinmux; the Servo2040 UART-bus feature wires TX/RX to
+//! GPIO0/1 (this type) and DIR to an [`OutputPin`] (GPIO2 on that board).
 
 use embedded_hal::digital::OutputPin;
 use lucy_embedded_firmware_core::uart::UartChannel;
@@ -13,6 +14,7 @@ use rp2040_hal::{
 
 pub enum UartError {}
 
+/// UART0 pin pair used by the Servo2040 bus-servo feature (GPIO0 TX, GPIO1 RX).
 type Uart0Pins = (
     Pin<bank0::Gpio0, FunctionUart, PullDown>,
     Pin<bank0::Gpio1, FunctionUart, PullDown>,

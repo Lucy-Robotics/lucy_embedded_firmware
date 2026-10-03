@@ -330,7 +330,7 @@ actuators:
     fn bus_servo_yaml_codegens_bus_device_table() {
         let yaml = r#"
 board_class: bus_servo_only
-firmware_crate: firmwares/rp2040_bus_servo
+firmware_crate: firmwares/rp2040_servo2040
 actuators:
   - id: rotation
     enabled: true

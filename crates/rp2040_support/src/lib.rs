@@ -1,9 +1,9 @@
-//! Shared RP2040 bring-up and peripheral banks for Lucy board firmwares.
+//! Shared RP2040 MCU bring-up and peripheral banks for Lucy board firmwares.
 //!
-//! Board binaries own pinmux and board-only extras (e.g. WS2812). This crate
-//! holds USB CDC + Modbus polling, PWM / UART bus / I2C-PWM / ADC banks, and
-//! picotool force-reset. Banks activate from YAML codegen tables: init only
-//! when `GENERATED_*_DEVICE_COUNT > 0`.
+//! Board binaries own pinmux and board-only extras (e.g. Servo2040 WS2812,
+//! UART-bus pad choice). This crate holds USB CDC + Modbus polling, PWM /
+//! UART bus / I2C-PWM / ADC banks, and picotool force-reset — reusable across
+//! RP2040 boards. Banks activate from YAML codegen tables (`GENERATED_HAS_*`).
 
 #![no_std]
 

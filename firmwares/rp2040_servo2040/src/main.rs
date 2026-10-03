@@ -1,9 +1,12 @@
-//! Pimoroni Servo2040 — one firmware binary for all Servo2040 board classes.
+//! Pimoroni Servo2040 — one board firmware for all Servo2040 `board_class`es.
 //!
-//! YAML (`config.yaml` / `LUCY_FIRMWARE_CONFIG`) enables PWM, I2C-PWM, and ADC
-//! banks via codegen tables (`GENERATED_HAS_*`). Shared bring-up lives in
-//! `lucy_embedded_firmware_rp2040_support`. UART bus servos use the dedicated
-//! `rp2040_bus_servo` board firmware (different pinout).
+//! YAML (`config.yaml` / `LUCY_FIRMWARE_CONFIG`) enables PWM, UART bus, I2C-PWM,
+//! and ADC banks via codegen (`GENERATED_HAS_*`). MCU banks / USB / Modbus live
+//! in `lucy_embedded_firmware_rp2040_support`; this crate owns pinmux and the
+//! WS2812 status LED.
+//!
+//! UART bus is a Servo2040 board feature: when `GENERATED_HAS_BUS`, UART0 uses
+//! GPIO0/1 + DIR GPIO2 (Servo1–3 silk). Do not also enable those pads as PWM.
 #![no_std]
 #![no_main]
 
@@ -11,32 +14,35 @@ mod board_layout;
 mod config;
 
 use config::{
-    GENERATED_ADC_DEVICES, GENERATED_HAS_ADC, GENERATED_HAS_I2C_PWM, GENERATED_HAS_PWM,
-    GENERATED_I2C_PWM_DEVICES, GENERATED_PWM_DEVICES, GENERATED_SLAVE_ADDRESS,
-    GENERATED_USB_SERIAL_ID,
+    GENERATED_ADC_DEVICES, GENERATED_BUS_DEVICES, GENERATED_HAS_ADC, GENERATED_HAS_BUS,
+    GENERATED_HAS_I2C_PWM, GENERATED_HAS_PWM, GENERATED_I2C_PWM_DEVICES, GENERATED_PWM_DEVICES,
+    GENERATED_SLAVE_ADDRESS, GENERATED_USB_SERIAL_ID,
 };
 use lucy_embedded_firmware_core::modbus::{RegisterTable, Slave};
 use lucy_embedded_firmware_rp2040_support::{
-    build_usb_device, resolve_usb_serial, unreset_pwm, AdcBank, AdcBankDevice, I2cPwmBank,
-    I2cPwmBankDevice, ModbusCdcState, PwmBank, MAX_ADC_DEVICES, MAX_I2C_PWM_DEVICES,
+    build_usb_device, resolve_usb_serial, unreset_pwm, AdcBank, AdcBankDevice, BusBank,
+    BusBankDevice, I2cPwmBank, I2cPwmBankDevice, ModbusCdcState, PwmBank, Rp2040UartChannel,
+    MAX_ADC_DEVICES, MAX_BUS_DEVICES, MAX_I2C_PWM_DEVICES,
 };
 
+use cortex_m_rt::entry;
+use embedded_hal::digital::OutputPin;
+use panic_halt as _;
 use rp2040_hal::{
     clocks::init_clocks_and_plls,
-    gpio::{DynPinId, FunctionNull, FunctionPio0, Pins, PullDown},
+    fugit::RateExtU32,
+    gpio::{DynPinId, FunctionNull, FunctionPio0, FunctionUart, Pins, PullDown},
     pac,
     pio::PIOExt,
     sio::Sio,
     timer::Timer,
+    uart::{DataBits, StopBits, UartConfig, UartPeripheral},
     watchdog::Watchdog,
     Clock,
 };
 use smart_leds::{SmartLedsWrite, RGB8};
 use usb_device::class_prelude::*;
 use ws2812_pio::Ws2812;
-
-use cortex_m_rt::entry;
-use panic_halt as _;
 
 #[unsafe(link_section = ".boot2")]
 #[unsafe(no_mangle)]
@@ -83,10 +89,58 @@ fn main() -> ! {
     leds[0] = RGB8 { r: 0, g: 10, b: 0 };
     let _ = ws.write(leds.iter().cloned());
 
+    // GPIO0–2: UART bus (TX/RX/DIR) when HAS_BUS, else PWM Servo1–3.
+    let mut gpio0 = Some(pins.gpio0);
+    let mut gpio1 = Some(pins.gpio1);
+    let mut gpio2 = Some(pins.gpio2);
+
+    let mut bus_bank = if GENERATED_HAS_BUS {
+        let uart_tx = gpio0.take().unwrap().into_function::<FunctionUart>();
+        let uart_rx = gpio1.take().unwrap().into_function::<FunctionUart>();
+        let mut dir_pin = gpio2.take().unwrap().into_push_pull_output();
+        let _ = dir_pin.set_low();
+        let uart = UartPeripheral::new(pac.UART0, (uart_tx, uart_rx), &mut pac.RESETS)
+            .enable(
+                UartConfig::new(1_000_000.Hz(), DataBits::Eight, None, StopBits::One),
+                clocks.peripheral_clock.freq(),
+            )
+            .unwrap();
+        let channel = Rp2040UartChannel {
+            uart,
+            dir: dir_pin,
+        };
+        let mut device_buf = [BusBankDevice {
+            device_id: 0,
+            base_register: 0,
+            config: lucy_embedded_firmware_core::drivers::BusServoConfig {
+                min_pulse: 0,
+                max_pulse: 4095,
+                min_angle: 0,
+                max_angle: 6283,
+                default_angle: 3142,
+            },
+        }; MAX_BUS_DEVICES];
+        let mut n = 0usize;
+        for d in GENERATED_BUS_DEVICES.iter().take(MAX_BUS_DEVICES) {
+            if d.uart != 0 {
+                continue;
+            }
+            device_buf[n] = BusBankDevice {
+                device_id: d.device_id,
+                base_register: d.base_register,
+                config: d.config,
+            };
+            n += 1;
+        }
+        Some(BusBank::new(channel, &device_buf[..n]))
+    } else {
+        None
+    };
+
     let mut pin_pool: [Option<PinDynNull>; 18] = [
-        Some(pins.gpio0.into_dyn_pin()),
-        Some(pins.gpio1.into_dyn_pin()),
-        Some(pins.gpio2.into_dyn_pin()),
+        gpio0.map(|p| p.into_dyn_pin()),
+        gpio1.map(|p| p.into_dyn_pin()),
+        gpio2.map(|p| p.into_dyn_pin()),
         Some(pins.gpio3.into_dyn_pin()),
         Some(pins.gpio4.into_dyn_pin()),
         Some(pins.gpio5.into_dyn_pin()),
@@ -209,6 +263,9 @@ fn main() -> ! {
         address: GENERATED_SLAVE_ADDRESS,
     };
     let rt = RegisterTable::default();
+    if let Some(bank) = bus_bank.as_mut() {
+        bank.seed_id_registers(&rt);
+    }
     let mut modbus = ModbusCdcState::new(115_200);
 
     let _ = delay;
@@ -221,6 +278,9 @@ fn main() -> ! {
 
         if let (Some(bank), Some(pwm)) = (&pwm_bank, &pwm_hw) {
             bank.tick(pwm, &rt);
+        }
+        if let Some(bank) = bus_bank.as_mut() {
+            bank.tick(&rt);
         }
         if let Some(bank) = i2c_bank.as_mut() {
             bank.tick(&rt);

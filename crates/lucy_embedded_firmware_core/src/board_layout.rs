@@ -133,10 +133,20 @@ impl BoardLayout for Rp2040BusServoLayout {
 }
 
 /// Select a layout by `board_class` or `firmware_crate` path fragment.
+///
+/// Prefer `board_class` when set so `bus_servo_only` keeps the UART-only
+/// channel map even though it builds the shared `rp2040_servo2040` crate.
 pub fn layout_for_board(
     board_class: &str,
     firmware_crate: Option<&str>,
 ) -> Option<&'static dyn BoardLayout> {
+    match board_class {
+        "internal_servo_only" | "internal_servo_i2c_pwm" => {
+            return Some(&Rp2040Servo2040Layout);
+        }
+        "bus_servo_only" => return Some(&Rp2040BusServoLayout),
+        _ => {}
+    }
     if let Some(path) = firmware_crate {
         if path.contains("rp2040_servo2040")
             || path.contains("rp2040_internal_pwm")
@@ -144,15 +154,8 @@ pub fn layout_for_board(
         {
             return Some(&Rp2040Servo2040Layout);
         }
-        if path.contains("rp2040_bus_servo") {
-            return Some(&Rp2040BusServoLayout);
-        }
     }
-    match board_class {
-        "internal_servo_only" | "internal_servo_i2c_pwm" => Some(&Rp2040Servo2040Layout),
-        "bus_servo_only" => Some(&Rp2040BusServoLayout),
-        _ => None,
-    }
+    None
 }
 
 #[cfg(test)]
@@ -215,5 +218,21 @@ mod tests {
             Some("firmwares/rp2040_servo2040")
         )
         .is_some());
+        // Shared crate path must not override UART-only board_class layout.
+        assert_eq!(
+            layout_for_board("bus_servo_only", Some("firmwares/rp2040_servo2040"))
+                .unwrap()
+                .resolve("UART0:1"),
+            Some(HardwareIdentity::UartBus {
+                uart: 0,
+                device_id: Some(1)
+            })
+        );
+        assert_eq!(
+            layout_for_board("bus_servo_only", Some("firmwares/rp2040_servo2040"))
+                .unwrap()
+                .resolve("Servo1"),
+            None
+        );
     }
 }

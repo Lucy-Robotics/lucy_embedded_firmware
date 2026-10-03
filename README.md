@@ -23,9 +23,8 @@ pixi run firmware-flash
 |------|------|
 | `crates/lucy_embedded_firmware_core` | `no_std` Modbus + drivers + `BoardLayout` |
 | `crates/builder` | YAML → `$OUT_DIR/config.rs` codegen (auto virtual pins) |
-| `crates/rp2040_support` | Shared RP2040 bring-up: USB CDC, Modbus poll, PWM / UART / I2C-PWM / ADC banks, `PicoToolReset` |
-| `firmwares/rp2040_servo2040` | Pimoroni Servo2040 - thin main; PWM + I2C-PWM + ADC gated by YAML |
-| `firmwares/rp2040_bus_servo` | UART bus-servo board (Feetech/STS @ UART0 GPIO0/1, DIR GPIO2) |
+| `crates/rp2040_support` | Shared RP2040 MCU bring-up: USB CDC, Modbus poll, PWM / UART / I2C-PWM / ADC banks, `PicoToolReset` |
+| `firmwares/rp2040_servo2040` | Pimoroni Servo2040 — one board binary; PWM / UART-bus / I2C-PWM / ADC gated by YAML |
 | `firmwares/sim` | Host-side Modbus client (dev) |
 | `config/` | **Generated** `config_<board_id>.yaml` (gitignored except README) |
 
@@ -45,7 +44,7 @@ Local cargo without the pipeline:
 
 ```bash
 export LUCY_FIRMWARE_CONFIG=/abs/path/to/config_rp2040_so_arm.yaml
-cargo build --release -p lucy_embedded_firmware_rp2040_bus_servo \
+cargo build --release -p lucy_embedded_firmware_rp2040_servo2040 \
   --target thumbv6m-none-eabi
 ```
 
@@ -67,13 +66,14 @@ Modbus bases match `LucySystemHardware`; otherwise the builder assigns densely.
 |---------------|---------------|
 | `internal_servo_only` | `lucy_embedded_firmware_rp2040_servo2040` |
 | `internal_servo_i2c_pwm` | `lucy_embedded_firmware_rp2040_servo2040` |
-| `bus_servo_only` | `lucy_embedded_firmware_rp2040_bus_servo` |
+| `bus_servo_only` | `lucy_embedded_firmware_rp2040_servo2040` |
 
 One physical Servo2040 board → one firmware binary. YAML enables PWM servos,
-I2C/PCA9685 channels (`I2C0:PCA9685:N`), and ADC/pressure placeholders
-(`ADC0`…). Build-time gates `GENERATED_HAS_PWM` / `HAS_I2C_PWM` / `HAS_ADC` /
-`HAS_BUS` select which banks initialize. UART bus servos use the separate
-`rp2040_bus_servo` board package (different pinout).
+UART bus (`UART0:N` on GPIO0/1 + DIR GPIO2), I2C/PCA9685
+(`I2C0:PCA9685:N`), and ADC/pressure placeholders (`ADC0`…). Build-time gates
+`GENERATED_HAS_PWM` / `HAS_I2C_PWM` / `HAS_ADC` / `HAS_BUS` select which banks
+initialize. Pinmux stays in the board crate; MCU banks live in
+`rp2040_support`.
 
 ## PWM notes
 

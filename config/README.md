@@ -19,4 +19,5 @@ cargo build --release -p lucy_embedded_firmware_rp2040_servo2040 \
 ```
 
 Or drop `config_<board_id>.yaml` into this directory after running the
-config pipeline / generator.
+config pipeline / generator. All Servo2040 `board_class` values (including
+`bus_servo_only`) build that same crate; YAML `GENERATED_HAS_*` gates banks.
