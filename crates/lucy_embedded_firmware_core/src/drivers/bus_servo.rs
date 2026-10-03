@@ -1,17 +1,25 @@
-use crate::{uart::UartChannel};
-use crate::{modbus::RegisterView, modbus::ModbusAdapter, utils::map_range};
+use crate::uart::UartChannel;
+use crate::{
+    modbus::{ModbusAdapter, RegisterView},
+    utils::millirad_to_pulse,
+};
 
 fn compute_checksum(payload: &[u8]) -> u8 {
     let sum: u8 = payload.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
     !sum
 }
 
+/// Bus-servo configuration. Angle fields are **milliradians** (`rad × 1000`).
+///
+/// `min_pulse`/`max_pulse` are STS3215 position ticks (typically 0..4095), not
+/// PWM duty counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusServoConfig {
     pub min_pulse: u16,
     pub max_pulse: u16,
     pub min_angle: u16,
     pub max_angle: u16,
-    pub default_angle: u16
+    pub default_angle: u16,
 }
 
 pub struct BusServoDriver<U> {
@@ -41,7 +49,7 @@ impl<U: UartChannel> BusServoDriver<U> {
         let checksum = compute_checksum(payload_to_sum);
         frame[frame.len() - 1] = checksum;
 
-        self.channel.write(&frame);
+        let _ = self.channel.write(&frame);
     }
 
     pub fn set_servo_mode(&mut self, id: u8) {
@@ -65,7 +73,7 @@ impl<U: UartChannel> BusServoDriver<U> {
         let checksum = compute_checksum(payload_to_sum);
         frame[frame.len() - 1] = checksum;
 
-        self.channel.write(&frame);
+        let _ = self.channel.write(&frame);
     }
 
     pub fn enable_torque(&mut self, id: u8, enable: bool) {
@@ -89,21 +97,18 @@ impl<U: UartChannel> BusServoDriver<U> {
         let checksum = compute_checksum(payload_to_sum);
         frame[frame.len() - 1] = checksum;
 
-        self.channel.write(&frame);
+        let _ = self.channel.write(&frame);
     }
 
-    pub fn move_angle(&mut self, id: u8, angle_rad: u16) {
-        let angle_deg = (angle_rad as f32 / 1000.0).to_degrees();
-        let clamped_deg = angle_deg.clamp(0 as f32, 360 as f32);
-        let pulse = (map_range(
-            clamped_deg,
-            self.config.min_angle as f32,
-            self.config.max_angle as f32,
-            self.config.min_pulse as f32,
-            self.config.max_pulse as f32,
-        ) + 0.5) as u16;
-
-
+    /// `angle_millirad` is radians × 1000.
+    pub fn move_angle(&mut self, id: u8, angle_millirad: u16) {
+        let pulse = millirad_to_pulse(
+            angle_millirad,
+            self.config.min_angle,
+            self.config.max_angle,
+            self.config.min_pulse,
+            self.config.max_pulse,
+        );
 
         const REG_TARGET_POSITION: u8 = 0x2A;
         const INST_WRITE: u8 = 0x03;
@@ -129,16 +134,15 @@ impl<U: UartChannel> BusServoDriver<U> {
             time_h,
             spd_l,
             spd_h,
-            0x00
+            0x00,
         ];
         let payload_to_sum = &frame[2..frame.len() - 1];
         let checksum = compute_checksum(payload_to_sum);
         frame[frame.len() - 1] = checksum;
 
-        self.channel.write(&frame);
+        let _ = self.channel.write(&frame);
     }
 }
-
 
 pub struct BusServoModbusAdapter<'a, U> {
     pub base_register: u16,
@@ -160,22 +164,20 @@ impl<'a, U: UartChannel> ModbusAdapter for BusServoModbusAdapter<'a, U> {
             1 => {
                 let angle = rv.read_register(self.angle_reg_off);
                 self.driver.move_angle(id, angle);
-            },
+            }
             2 => {
                 self.driver.set_servo_mode(id);
-            },
+            }
             3 => {
                 self.driver.enable_torque(id, true);
-            },
+            }
             4 => {
                 self.driver.enable_led(id, false);
-            },
+            }
             5 => {
                 self.driver.enable_torque(id, false);
-            },
-            _ => {
-
             }
+            _ => {}
         }
     }
 
