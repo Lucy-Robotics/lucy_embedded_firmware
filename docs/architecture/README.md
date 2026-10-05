@@ -7,6 +7,6 @@
 
 | Doc | Content |
 |-----|---------|
-| [firmware.md](firmware.md) | Board crates, shared `rp2040_support`, YAML codegen gates |
+| [firmware.md](firmware.md) | Dual SO101 paths + InMoov Servo2040, UART Feetech, HI f64 SHM, banks |
 
 Do not copy the workspace system chart here — link up instead.
