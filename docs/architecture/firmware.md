@@ -13,16 +13,16 @@ Detail for **`lucy_embedded_firmware`**.
 
 ### What tips ship today (`cma/fw-boards` + ros Modbus tips)
 
-Host `LucySystemHardware` writes **millirad `u16` dirty registers** in POSIX SHM; **`lucy_modbus_bridge`** (on ros `cma/pipeline-flash`) polls SHM and sends **Modbus RTU FC06 over USB CDC** to the RP2040. The MCU never mmaps host SHM.
+Host `LucySystemHardware` writes **pulse `u16` dirty registers** in POSIX SHM; **`lucy_modbus_bridge`** (on ros `cma/pipeline-flash`) polls SHM and sends **Modbus RTU FC06 over USB CDC** to the RP2040. The MCU never mmaps host SHM.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
 flowchart TB
   HI["LucySystemHardware"]
-  SHM["POSIX_SHM_millirad_regs"]
+  SHM["POSIX_SHM_pulse_regs"]
   Bridge["lucy_modbus_bridge"]
   S2040["rp2040_servo2040"]
-  HI -->|"u16 millirad + dirty"| SHM
+  HI -->|"u16 pulse + dirty"| SHM
   Bridge -->|"poll SHM"| SHM
   Bridge -->|"Modbus FC06 USB CDC"| S2040
   S2040 -->|"HAS_PWM"| PWM["PwmBank"]
@@ -144,7 +144,7 @@ Rust names: `BusBank` = UART0 Feetech/STS; `I2cPwmBank` = PCA9685 over **I2C** (
 | Layer | Unit today | Target |
 |-------|------------|--------|
 | Robot YAML / HI command interfaces | radians in YAML on rad tips | radians |
-| Host SHM (Modbus tips) | millirad `u16` + dirty bits | — |
+| Host SHM (Modbus tips) | pulse `u16` + dirty bits | — |
 | Host SHM (WIP #63 / `JointTable`) | — | **`f64` rad** arrays + seq counters |
 | Feetech ticks | driver maps rad ↔ STS ticks (`0…4095` typical) | unchanged |
 
