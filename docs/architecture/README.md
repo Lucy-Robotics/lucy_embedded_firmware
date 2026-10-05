@@ -1,12 +1,11 @@
 # Architecture — lucy_embedded_firmware
 
-**Component-level** docs for this repo only.  
-**Index:** [`lucy_ws/docs/architecture/README.md`](../../../../docs/architecture/README.md)  
-**System view:** [`lucy_ws/docs/architecture/overview.md`](../../../../docs/architecture/overview.md)  
-**Conventions:** [`lucy_ws/docs/architecture/GUIDE.md`](../../../../docs/architecture/GUIDE.md)
+**Component-level** docs for this repo only.
 
 | Doc | Content |
 |-----|---------|
-| [firmware.md](firmware.md) | Dual SO101 paths + InMoov Servo2040, UART Feetech, HI f64 SHM, banks |
+| [firmware.md](firmware.md) | Current Modbus→Servo2040 path, UART Feetech, WIP f64 SHM / host Feetech |
 
-Do not copy the workspace system chart here — link up instead.
+**Workspace (under `lucy_ws/src/`):** [control-panel overview](../../../lucy_control_panel/docs/architecture/overview.md) · [ROS pipeline/SHM](../../../lucy_ros_packages/docs/architecture/pipeline_shm.md)
+
+Do not assume a top-level `lucy_ws/docs/architecture/` tree exists in every checkout.
