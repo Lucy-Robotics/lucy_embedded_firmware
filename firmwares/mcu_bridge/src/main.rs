@@ -1,179 +1,28 @@
-use std::io::{Read, Write};
 use std::fs::File;
-use std::fmt;
 use std::time::Duration;
-use core::cell::Cell;
-use modbus_core::{Request, Response, FunctionCode};
-use serialport::{SerialPortType, UsbPortInfo};
+use core::option::{Option};
 
 use memmap2::MmapMut;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
+use lucy_embedded_firmware_core::data::{Table};
+use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
+use crc::{Crc, CRC_16_MODBUS};
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
+mod usb_port;
+use usb_port::{UsbPort, UsbPortConfig};
 
-#[repr(C)]
-struct RegisterTable {
-    pub registers: [Cell<u16>; 0xFF],
-}
+const TABLE_CRC: Crc<u16> = Crc::<u16>::new(&CRC_16_MODBUS);
 
-
-impl Clone for RegisterTable {
-    fn clone(&self) -> Self {
-        let ntable = RegisterTable::default();
-        for i in 0..0xFF {
-            ntable.registers[i].set(self.registers[i].get());
-        }
-        ntable
+fn table_as_bytes<const N: usize>(table: &Table<N>) -> &[u8] {
+    unsafe {
+        core::slice::from_raw_parts(
+            table as *const Table<N> as *const u8,
+            size_of::<Table<N>>(),
+        )
     }
-}
-
-pub trait Copy: Clone {}
-
-impl RegisterTable {
-    const fn new() -> Self {
-        Self {
-            registers: [const { Cell::new(0) }; 0xFF],
-        }
-    }
-}
-
-impl Default for RegisterTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct PosixNamedSem {
-    sem: *mut libc::sem_t,
-    name: CString,
-}
-
-impl PosixNamedSem {
-    pub fn create(name: &str, val: u32) -> Self {
-        let c_name = CString::new(name).unwrap();
-        let sem = unsafe {
-            libc::sem_open(
-                c_name.as_ptr(),
-                libc::O_CREAT,
-                0o644,
-                val as libc::c_uint,
-            )
-        };
-        // SEM_FAILED stored unchecked would surface as UB on the first wait().
-        // macOS caps these names at 30 bytes, so a long node name lands here.
-        if sem == libc::SEM_FAILED {
-            panic!(
-                "sem_open(\"{name}\") failed: {}",
-                std::io::Error::last_os_error(),
-            );
-        }
-        PosixNamedSem {
-            sem: sem,
-            name: c_name,
-        }
-    }
-
-    pub fn wait(&self) {
-        unsafe { libc::sem_wait(self.sem) };
-    }
-
-    pub fn post(&self) {
-        unsafe { libc::sem_post(self.sem) };
-    }
-}
-
-#[repr(C)]
-struct RegisterHeader {
-    header: [u8; 32],
-    iterator: u16,
-}
-
-impl RegisterHeader {
-    fn iter(&self) -> RegisterHeaderIter<'_> {
-        RegisterHeaderIter {
-            header: self,
-            cursor: 0,
-        }
-    }
-
-    fn get_register_status(&self, register: u16) -> bool {
-        let index: u16 = register / 8;
-        let index2: u16 = register % 8;
-        ((self.header[index as usize] >> (7 - index2)) & 0b1) != 0
-    }
-
-    fn switch_register_status(&mut self, register: u16) {
-        let index: u16 = register / 8;
-        let index2: u16 = register % 8;
-        self.header[index as usize] = self.header[index as usize] ^ ((1 & 0xFF) << (7 - index2))
-    }
-
-    fn set_dirty(&mut self, register: u16) {
-        if self.get_register_status(register) {
-            return
-        }
-        self.switch_register_status(register);
-    }
-
-    fn set_clean(&mut self, register: u16) {
-        if !self.get_register_status(register) {
-            return
-        }
-        self.switch_register_status(register);
-    }
-}
-
-impl fmt::Display for RegisterHeader {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[\n");
-        for tmp in self.header.iter() {
-            write!(f, "{:08b}\n", tmp);
-        }
-        write!(f, "]")
-    }
-}
-
-pub struct RegisterHeaderIter<'a> {
-    header: &'a RegisterHeader,
-    cursor: u16,
-}
-
-impl<'a> Iterator for RegisterHeaderIter<'a> {
-    type Item = (u16, bool);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cursor < 32 * 8 {
-            let value = (self.cursor, self.header.get_register_status(self.cursor));
-            self.cursor += 1;
-            Some(value)
-        } else {
-            None
-        }
-    }
-}
-
-fn append_crc(frame: &mut Vec<u8>) {
-    let crc = modbus_core::rtu::crc16(&frame);
-    frame.extend_from_slice(&crc.to_be_bytes());
-}
-
-fn write_register(
-    slave_addr: u8,
-    reg_addr: u16,
-    reg_value: u16
-) -> Vec<u8> {
-    let mut frame = Vec::new();
-    frame.push(slave_addr);
-
-    frame.push(FunctionCode::WriteSingleRegister.value());
-    frame.extend_from_slice(&reg_addr.to_be_bytes());
-    frame.extend_from_slice(&reg_value.to_be_bytes());
-
-    append_crc(&mut frame);
-    frame
 }
 
 fn node_name() -> String {
@@ -199,81 +48,38 @@ fn open_shm(name: &str, min_len: usize) -> File {
         .metadata()
         .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
         .len() as usize;
-    if len < min_len {
+    if len != min_len {
         panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
     }
     file
 }
 
+
 fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let reg_table_file = open_shm(
-        &format!("/{node}.lucy_reg_table"),
-        size_of::<RegisterTable>(),
+    let shm_file = open_shm(
+        &format!("/{node}"),
+        size_of::<Table<32>>(),
     );
-    // Kept in scope: dropping the mapping would invalidate `rt`.
-    let table_map = unsafe { MmapMut::map_mut(&reg_table_file).unwrap() };
-    let rt: &RegisterTable = unsafe {
-        &*(table_map.as_ptr() as *const RegisterTable)
+
+    let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
+    let ass: &mut Table<32> = unsafe {
+        &mut *(table_map.as_ptr() as *mut Table<32>)
     };
 
-    let reg_header_file = open_shm(
-        &format!("/{node}.lucy_reg_header"),
-        size_of::<RegisterHeader>(),
-    );
-    let mut header_map = unsafe { MmapMut::map_mut(&reg_header_file).unwrap() };
-    let rh: &mut RegisterHeader = unsafe {
-        &mut *(header_map.as_mut_ptr() as *mut RegisterHeader)
-    };
-
-    let sem = PosixNamedSem::create(&format!("/{node}"), 1);
-    let target_vid = 0x16c0;
-    let target_pid = 0x27dd;
-
-    let ports = serialport::available_ports().unwrap();
-    let matching_port = ports.into_iter().find(|p| {
-        if let SerialPortType::UsbPort(UsbPortInfo { vid, pid, .. }) = p.port_type {
-            vid == target_vid && pid == target_pid
-        } else {
-            false
-        }
-    });
-
-    let port_info = matching_port.ok_or("Périphérique RP2040 introuvable. Est-il branché ?").unwrap();
-    println!("Périphérique trouvé sur : {}", port_info.port_name);
-
-    let mut port = serialport::new(&port_info.port_name, 115_200)
-        .timeout(Duration::from_millis(50))
-        .open().unwrap();
+    let usb_config = UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000);
+    let mut port = usb_config.open().expect("Failed to initialize USB Port");
 
     loop {
-        let mut changes: Vec<(u16, u16)> = Vec::new();
-        sem.wait();
-        for (iterator, status) in rh.iter() {
-            if status {
-                changes.push((iterator, rt.registers[iterator as usize].get()));
-            }
-        }
-        for (register, _) in &changes {
-            rh.set_clean(*register);
-        }
-        sem.post();
+        let payload = table_as_bytes(ass);
+        let crc = TABLE_CRC.checksum(payload);
 
-        for (register, value) in changes {
-            println!("Register done on {} - {}", register, value);
-            let packet = write_register(0x01, register, value);
-            let _ = port.write_all(&packet);
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        {
-            let mut buf = [0u8; 0xff];
-            if let Ok(n) = port.read(&mut buf) {
-                if n > 0 {
-                    print!("  <- firmware: {}", String::from_utf8_lossy(&buf[..n]));
-                }
-            }
-        }
+        let mut frame = Vec::with_capacity(payload.len() + 2);
+        frame.extend_from_slice(payload);
+        frame.extend_from_slice(&crc.to_le_bytes());
+
+        port.write(&frame).expect("Failed to write table over serial port");
     }
 }

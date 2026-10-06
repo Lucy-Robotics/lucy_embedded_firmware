@@ -73,7 +73,7 @@ impl SerialChannel for UsbPort {
     }
 
     fn clear(&mut self) -> Result<(), Self::Error> {
-        self.port.clear(serialport::ClearBuffer::Input)?;
+        self.port.clear(serialport::ClearBuffer::All)?;
         Ok(())
     }
 }

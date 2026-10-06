@@ -154,9 +154,14 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
     type Bus = S;
 
     fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
-        self.set_torque(bus, command);
-        self.set_position(bus, command, state);
-        //self.read_positions(bus, state);
+        self.set_torque(bus, command)?;
+        self.set_position(bus, command, state)?;
+        self.read_positions(bus, state)?;
+        match tick % 10 {
+            0 => self.read_temperatures(bus, state)?,
+            1 => self.read_torques(bus, state)?,
+            _ => {}
+        };
         Ok(())
     }
 }
@@ -267,7 +272,9 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
 
         Ok(())
     }
+}
 
+impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
     pub fn read_temperatures(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_TEMP: u8 = 0x3F;
         const RESPONSE_LEN: usize = 7;
@@ -299,7 +306,6 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         bus.write(&frame[..size])
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        // Servos answer one after another, in the same order as `ids` above.
         for s in state.iter_mut() {
             let mut rx_frame = [0u8; RESPONSE_LEN];
             bus.read(&mut rx_frame)
@@ -312,6 +318,58 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
 
             s.temperature = rx_frame[5] as f64;
         }
+
+        Ok(())
+    }
+
+    pub fn read_torques(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+        const REG_LOAD: u8 = 0x3C;
+        const RESPONSE_LEN: usize = 8;
+
+        if state.len() != N {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+
+        let mut ids = [0u8; 64];
+        if N > ids.len() {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+        for (slot, cfg) in ids.iter_mut().zip(self.config.servos.iter()) {
+            *slot = cfg.id;
+        }
+        let ids = &ids[..N];
+
+        let (frame, size) = RequestBuilder::<64>::new()
+            .set_id(0xFE)
+            .set_instruction(SYNC_READ)
+            .set_register(REG_LOAD)
+            .set_sync_length(2)
+            .build(ids)
+            .map_err(|_| FeetechBusError::OutOfLimits)?;
+
+        bus.clear()
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        bus.write(&frame[..size])
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        for s in state.iter_mut() {
+            let mut rx_frame = [0u8; RESPONSE_LEN];
+            bus.read(&mut rx_frame)
+                .map_err(|_| FeetechBusError::CommunicationError)?;
+
+            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
+            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
+                return Err(FeetechBusError::CommunicationError);
+            }
+
+            let raw = u16::from_le_bytes([rx_frame[5], rx_frame[6]]);
+            let magnitude = (raw & 0x3FF) as f64 / 1000.0;
+            let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
+            s.torque = sign * magnitude;
+            println!("Torque {}", s.torque);
+        }
+        println!();
 
         Ok(())
     }
