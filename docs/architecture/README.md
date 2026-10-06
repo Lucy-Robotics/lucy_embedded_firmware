@@ -4,7 +4,7 @@
 
 | Doc | Content |
 |-----|---------|
-| [firmware.md](firmware.md) | Current Modbus→Servo2040 path, UART Feetech, WIP f64 SHM / host Feetech |
+| [firmware.md](firmware.md) | f64 SHM contract, Servo2040 banks, host Feetech (`firmwares/linux`) |
 
 **Workspace (under `lucy_ws/src/`):** [control-panel overview](../../../lucy_control_panel/docs/architecture/overview.md) · [ROS pipeline/SHM](../../../lucy_ros_packages/docs/architecture/pipeline_shm.md)
 
