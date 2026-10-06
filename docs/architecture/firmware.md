@@ -9,7 +9,7 @@ Detail for **`lucy_embedded_firmware`**.
 
 ## Control path
 
-Host `LucySystemHardware` writes **`f64` radians** into POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM.
+Host `LucySystemHardware` exchanges **`f64` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
@@ -19,10 +19,10 @@ flowchart TB
   LinuxFW["firmwares_linux"]
   Bridge["host_to_MCU_bridge"]
   S2040["rp2040_servo2040"]
-  HI --> SHM
-  SHM -->|"SO101_host_USB_Feetech"| LinuxFW
-  SHM -->|"not_on_MCU"| Bridge
-  Bridge -->|"CDC_or_serial"| S2040
+  HI <-->|"f64 rad + seq"| SHM
+  SHM <-->|"SO101_host_USB_Feetech"| LinuxFW
+  SHM <-->|"not_on_MCU"| Bridge
+  Bridge <-->|"CDC_or_serial"| S2040
   S2040 -->|"HAS_PWM"| PWM["PwmBank"]
   S2040 -->|"HAS_BUS UART0 Feetech"| Bus["BusBank"]
   S2040 -->|"HAS_I2C_PWM"| I2C["I2cPcaBank"]
