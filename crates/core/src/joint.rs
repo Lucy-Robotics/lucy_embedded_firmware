@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct JointConfig {
+pub struct CommandConfig {
     pub default: f64,
     pub limit_min: f64,
     pub limit_max: f64,
@@ -24,7 +24,7 @@ impl From<f64> for TorqueStatus {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct JointCommand {
+pub struct Command {
     pub position: f64,
     pub velocity: f64,
     pub acceleration: f64,
@@ -32,7 +32,7 @@ pub struct JointCommand {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct JointState {
+pub struct State {
     pub position: f64,
     pub temperature: f64,
     pub torque: f64,

@@ -100,26 +100,32 @@ extensions:
       board: rp2040
       pin: sda
 
-actuators:
-  - id: left_shoulder_y_torso
-    urdf_joint: left_shoulder_y_link_joint
-    type: PWMServo
-    board: rp2040_torso_head
-    enabled: true
+groups:
+- name: pwm_servos
+  driver: PwmServoDriver
+  port: pwm_0
+  actuators:
+    - id: left_shoulder_y_torso
+      urdf_joint: left_shoulder_y_link_joint
+      enabled: true
 
-    config:
-      min_pulse: 0
-      max_pulse: 3500
-      min_angle: 0
-      max_angle: 180
-      default_angle: 0
+      config:
+        min_pulse: 0
+        max_pulse: 3500
+        limit_min: 0
+        limit_max: 180
+        default: 0
+- name: feetech
+  driver: FeetechBusDriver
+  port: uart_0
+  actuators:
+    - id: left_shoulder_y_torso
+      urdf_joint: left_shoulder_y_link_joint
+      enabled: true
 
-    modbus:
-      adapter: PWMServoModBusAdapter
-      registers:
-        cmd: {address: 0x01}
-        angle: {address: 0x10, multiplier: 100}
-
-    hardware:
-      board: rp2040
-      channel: 1
+      config:
+        min_pulse: 0
+        max_pulse: 3500
+        limit_min: 0
+        limit_max: 180
+        default: 0

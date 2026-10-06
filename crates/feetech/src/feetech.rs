@@ -1,12 +1,13 @@
 use crate::serial_channel::SerialChannel;
-use crate::link::{Link, Connected, Disconnected};
+//use crate::link::{AnyLink, Link, Connected, Disconnected};
 
-use lucy_embedded_firmware_core::actuator::Actuator;
+use lucy_embedded_firmware_core::actuator::{Actuator, ActuatorGroup};
 use lucy_embedded_firmware_core::joint::{*};
 
 use lucy_embedded_firmware_core::utils::map_range;
 
 use core::f32::consts::{TAU, PI};
+use core::marker::PhantomData;
 
 // === Request builder ===
 
@@ -23,6 +24,7 @@ struct RequestBuilder<const N: usize> {
     id: u8,
     instruction: u8,
     register: u8,
+    sync_length: Option<u8>,
 }
 
 impl<const N: usize> RequestBuilder<N> {
@@ -31,6 +33,7 @@ impl<const N: usize> RequestBuilder<N> {
             id: 0,
             instruction: 0,
             register: 0,
+            sync_length: None,
         }
     }
 
@@ -55,22 +58,34 @@ impl<const N: usize> RequestBuilder<N> {
         }
     }
 
+    fn set_sync_length(self, length: u8) -> Self {
+        RequestBuilder {
+            sync_length: Some(length),
+            ..self
+        }
+    }
+
     fn build(self, payload: &[u8]) -> Result<([u8; N], usize), BuildError> {
-        let total = 7 + payload.len();
+        let prefix_len = self.sync_length.is_some() as usize;
+        let total = 7 + prefix_len + payload.len();
         if total > N {
             return Err(BuildError::PayloadTooLarge);
         }
 
-        let end = 6 + payload.len();
+        let payload_start = 6 + prefix_len;
+        let end = payload_start + payload.len();
 
         let mut frame = [0u8; N];
         frame[0] = 0xFF;
         frame[1] = 0xFF;
         frame[2] = self.id;
-        frame[3] = payload.len() as u8 + 3;
+        frame[3] = (prefix_len + payload.len()) as u8 + 3;
         frame[4] = self.instruction;
         frame[5] = self.register;
-        frame[6..end].copy_from_slice(payload);
+        if let Some(sync_length) = self.sync_length {
+            frame[6] = sync_length;
+        }
+        frame[payload_start..end].copy_from_slice(payload);
 
         let checksum = compute_checksum(&frame[2..end]);
         frame[end] = checksum;
@@ -90,6 +105,7 @@ fn compute_checksum(payload: &[u8]) -> u8 {
 
 // === Individual servo
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeetechServoConfig {
     pub id: u8,
     pub amplitude: f64,
@@ -113,33 +129,56 @@ pub enum FeetechBusError {
     CommunicationError,
 }
 
-pub struct FeetechBusDriver<'a, S: SerialChannel, const N: usize> {
-    pub link: &'a mut Link<Connected, S>,
-    pub actuator_config: [&'a FeetechServoConfig; N],
-    pub joint_command: [&'a JointCommand; N],
-    pub joint_state: [&'a JointState; N],
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FeetechBusConfig<const N: usize> {
+    pub servos: [FeetechServoConfig; N],
 }
 
-impl<'a, S: SerialChannel, const N: usize> Actuator for FeetechBusDriver<'a, S, N> {
-    type Error = FeetechBusError;
+pub struct FeetechBusDriver<S: SerialChannel, const N: usize> {
+    _state: PhantomData<fn() -> S>,
+    pub config: &'static FeetechBusConfig<N>
+}
 
-    fn enable(&mut self) -> Result<(), Self::Error> {
+impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
+    pub fn new(config: &'static FeetechBusConfig<N>) -> Self {
+        Self {
+            _state: PhantomData,
+            config,
+        }
+    }
+
+}
+
+impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> {
+    type Error = FeetechBusError;
+    type Bus = S;
+
+    fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
+        self.set_torque(bus, command);
+        self.set_position(bus, command, state);
+        //self.read_positions(bus, state);
         Ok(())
     }
+}
 
-    fn disable(&mut self) {
+impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
+    pub fn set_position(&mut self, bus: &mut S, command: &[Command], state: &mut [State]) -> Result<(), FeetechBusError> {
+        const SYNC_WRITE_CHUNK_LEN: usize = 7;
+        const SYNC_WRITE_DATA_LEN: u8 = 6;
 
-    }
-
-    fn apply(&mut self) -> Result<(), Self::Error> {
         let mut payload = [0u8; 64];
-        let iter = self.actuator_config
-            .iter()
-            .zip(self.joint_command.iter())
-            .zip(self.joint_state.iter())
-            .zip(payload.chunks_exact_mut(7));
 
-        for (((&cfg, &cmd), &state), slot) in iter {
+        let max_payload_len = N * SYNC_WRITE_CHUNK_LEN;
+        if max_payload_len > payload.len() {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+
+        let mut count = 0usize;
+        for (&cfg, &cmd) in self.config.servos.iter().zip(command.iter()) {
+            if cmd.torque_enabled != TorqueStatus::Enabled {
+                continue;
+            }
+
             let time: u16 = 0;
             let velocity = cmd.velocity as u16;
             let pulse = (map_range(
@@ -153,34 +192,181 @@ impl<'a, S: SerialChannel, const N: usize> Actuator for FeetechBusDriver<'a, S, 
             let [pos_l, pos_h] = pulse.to_le_bytes();
             let [time_l, time_h] = time.to_le_bytes();
             let [spd_l, spd_h] = velocity.to_le_bytes();
-            slot.copy_from_slice(&[cfg.id, pos_l, pos_h, time_l, time_h, spd_l, spd_h]);
+
+            let offset = count * SYNC_WRITE_CHUNK_LEN;
+            payload[offset..offset + SYNC_WRITE_CHUNK_LEN]
+                .copy_from_slice(&[cfg.id, pos_l, pos_h, time_l, time_h, spd_l, spd_h]);
+            count += 1;
         }
 
-        let payload_len = N * 7;
-        let payload = &payload[..payload_len];
+        if count == 0 {
+            return Ok(());
+        }
+
+        let payload = &payload[..count * SYNC_WRITE_CHUNK_LEN];
 
         const REG_TARGET_POSITION: u8 = 0x2A;
-
 
         let (frame, size) = RequestBuilder::<64>::new()
             .set_id(0xFE)
             .set_instruction(SYNC_WRITE)
             .set_register(REG_TARGET_POSITION)
+            .set_sync_length(SYNC_WRITE_DATA_LEN)
             .build(payload)
             .map_err(|_| FeetechBusError::OutOfLimits)?;
 
-        self.link.channel
-            .clear()
+        bus.clear()
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        self.link.channel
-            .write(&frame)
+        bus.write(&frame[..size])
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        let mut echo_frame = [0u8; 8];
-        self.link.channel
-            .read(&mut echo_frame)
+        Ok(())
+    }
+
+    pub fn set_torque(&mut self, bus: &mut S, command: &[Command]) -> Result<(), FeetechBusError> {
+        const REG_TORQUE_ENABLE: u8 = 0x28;
+        const SYNC_WRITE_CHUNK_LEN: usize = 2;
+        const SYNC_WRITE_DATA_LEN: u8 = 1;
+
+        let mut payload = [0u8; 32];
+
+        let payload_len = N * SYNC_WRITE_CHUNK_LEN;
+        if payload_len > payload.len() {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+
+        let iter = self.config.servos
+            .iter()
+            .zip(command.iter())
+            .zip(payload.chunks_exact_mut(SYNC_WRITE_CHUNK_LEN));
+
+        for ((&cfg, &cmd), slot) in iter {
+            let value: u8 = match cmd.torque_enabled {
+                TorqueStatus::Enabled => 1,
+                TorqueStatus::Disabled => 0,
+            };
+            slot.copy_from_slice(&[cfg.id, value]);
+        }
+
+        let payload = &payload[..payload_len];
+
+        let (frame, size) = RequestBuilder::<32>::new()
+            .set_id(0xFE)
+            .set_instruction(SYNC_WRITE)
+            .set_register(REG_TORQUE_ENABLE)
+            .set_sync_length(SYNC_WRITE_DATA_LEN)
+            .build(payload)
+            .map_err(|_| FeetechBusError::OutOfLimits)?;
+
+        bus.clear()
             .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        bus.write(&frame[..size])
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        Ok(())
+    }
+
+    pub fn read_temperatures(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+        const REG_TEMP: u8 = 0x3F;
+        const RESPONSE_LEN: usize = 7;
+
+        if state.len() != N {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+
+        let mut ids = [0u8; 64];
+        if N > ids.len() {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+        for (slot, cfg) in ids.iter_mut().zip(self.config.servos.iter()) {
+            *slot = cfg.id;
+        }
+        let ids = &ids[..N];
+
+        let (frame, size) = RequestBuilder::<64>::new()
+            .set_id(0xFE)
+            .set_instruction(SYNC_READ)
+            .set_register(REG_TEMP)
+            .set_sync_length(1)
+            .build(ids)
+            .map_err(|_| FeetechBusError::OutOfLimits)?;
+
+        bus.clear()
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        bus.write(&frame[..size])
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        // Servos answer one after another, in the same order as `ids` above.
+        for s in state.iter_mut() {
+            let mut rx_frame = [0u8; RESPONSE_LEN];
+            bus.read(&mut rx_frame)
+                .map_err(|_| FeetechBusError::CommunicationError)?;
+
+            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
+            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
+                return Err(FeetechBusError::CommunicationError);
+            }
+
+            s.temperature = rx_frame[5] as f64;
+        }
+
+        Ok(())
+    }
+
+    pub fn read_positions(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+        const REG_PRESENT_POSITION: u8 = 0x38;
+        const RESPONSE_LEN: usize = 8;
+
+        if state.len() != N {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+
+        let mut ids = [0u8; 64];
+        if N > ids.len() {
+            return Err(FeetechBusError::OutOfLimits);
+        }
+        for (slot, cfg) in ids.iter_mut().zip(self.config.servos.iter()) {
+            *slot = cfg.id;
+        }
+        let ids = &ids[..N];
+
+        let (frame, size) = RequestBuilder::<64>::new()
+            .set_id(0xFE)
+            .set_instruction(SYNC_READ)
+            .set_register(REG_PRESENT_POSITION)
+            .set_sync_length(2)
+            .build(ids)
+            .map_err(|_| FeetechBusError::OutOfLimits)?;
+
+        bus.clear()
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        bus.write(&frame[..size])
+            .map_err(|_| FeetechBusError::CommunicationError)?;
+
+        for (cfg, s) in self.config.servos.iter().zip(state.iter_mut()) {
+            let mut rx_frame = [0u8; RESPONSE_LEN];
+            bus.read(&mut rx_frame)
+                .map_err(|_| FeetechBusError::CommunicationError)?;
+
+            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
+            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
+                return Err(FeetechBusError::CommunicationError);
+            }
+
+            let pulse = u16::from_le_bytes([rx_frame[5], rx_frame[6]]);
+            s.position = map_range(
+                pulse as f64,
+                cfg.min_pulse as f64,
+                cfg.max_pulse as f64,
+                0f64,
+                cfg.amplitude,
+            );
+        }
+
         Ok(())
     }
 }
@@ -220,7 +406,7 @@ impl<'cfg, 'bus, C: SerialChannel> TorqueEnableInterface for BusServoDriver<'cfg
     }
 }
 
-impl<'cfg, 'bus, C: SerialChannel> JointStateInterface for BusServoDriver<'cfg, 'bus, C> {
+impl<'cfg, 'bus, C: SerialChannel> StateInterface for BusServoDriver<'cfg, 'bus, C> {
     type Error = BusServoError;
 
     fn get_position(&mut self) -> Result<f64, Self::Error> {

@@ -21,7 +21,7 @@ pub struct HeartbeatBlock {
 }
 
 #[repr(C, align(64))]
-pub struct JointTable<const N: usize> {
+pub struct Table<const N: usize> {
     pub commands: CommandBlock<N>,
     pub states: StateBlock<N>,
     pub heartbeat: HeartbeatBlock,

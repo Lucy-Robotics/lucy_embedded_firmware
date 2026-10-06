@@ -1,4 +1,3 @@
-#![no_std]
 
 pub mod joint;
 pub mod actuator;

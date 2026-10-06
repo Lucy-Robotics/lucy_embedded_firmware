@@ -2,30 +2,25 @@ use crate::joint::{*};
 use crate::actuator::{*};
 use crate::data::{*};
 
-pub struct Robot<A, const M: usize, const N: usize> {
-    pub command: [JointCommand; M],
-    pub state: [JointState; M],
-    pub joint_config: [JointConfig; M],
-    pub actuator_config: [A; N],
+pub struct Robot<const M: usize> {
+    pub joints_config: &'static [CommandConfig],
+    pub joints_command: [Command; M],
+    pub joints_state: [State; M],
 }
 
-impl<A, const M: usize, const N: usize> Robot<A, M, N> {
-    pub fn sync_write(&mut self, command_block: &CommandBlock<N>) {
-        for i in 0..N {
-            self.command[i].position = command_block.hw_commands[i];
-            self.command[i].velocity = command_block.hw_velocities[i];
-            self.command[i].acceleration = command_block.hw_accelerations[i];
-            self.command[i].torque_enabled = TorqueStatus::from(command_block.hw_torque_enabled[i]);
+impl<const M: usize> Robot<M> {
+    pub fn sync_write<const N: usize>(&mut self, command_block: &CommandBlock<N>) {
+        for i in 0..M {
+            self.joints_command[i].position = command_block.hw_commands[i];
+            self.joints_command[i].velocity = command_block.hw_velocities[i];
+            self.joints_command[i].acceleration = command_block.hw_accelerations[i];
+            self.joints_command[i].torque_enabled = TorqueStatus::from(command_block.hw_torque_enabled[i]);
         }
     }
 
-    pub fn sync_read(&self, state_block: &mut StateBlock<N>) {
-        for i in 0..N {
-            state_block.hw_positions[i] = self.state[i].position;
+    pub fn sync_read<const N: usize>(&self, state_block: &mut StateBlock<N>) {
+        for i in 0..M {
+            state_block.hw_positions[i] = self.joints_state[i].position;
         }
     }
-
-    pub fn tick(&mut self) {
-    }
 }
-

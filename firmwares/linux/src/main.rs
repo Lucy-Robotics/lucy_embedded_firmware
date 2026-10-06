@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::time::Duration;
+use core::option::{Option};
 
 use memmap2::MmapMut;
 
-use lucy_embedded_firmware_core::data::{JointTable};
+use lucy_embedded_firmware_core::data::{Table};
 use lucy_embedded_firmware_core::robot::{Robot};
-use lucy_embedded_firmware_feetech::link::{Link, AnyLink, Controller};
 
 use lucy_embedded_firmware_core::joint::{*};
 
@@ -14,14 +14,22 @@ use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusDriv
 //use lucy_embedded_firmware_core::drivers::bus_servo::{BusServoDriver, BusServoConfig};
 //use lucy_embedded_firmware_core::actuator::{JointTrajectoryPoint, JointTrajectoryInterface, TorqueStatus, TorqueEnableInterface, JointStateInterface, TemperatureInterface, TorqueInterface};
 
-use core::f32::consts::TAU;
+use core::f32::consts::{PI, TAU};
 
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
+mod resources;
+use resources::Resources;
+
+mod board;
+use board::init;
+
 mod usb_port;
 use usb_port::UsbPort;
+mod config;
+use config::{get_robot, robot_tick};
 
 fn node_name() -> String {
     std::env::args()
@@ -46,26 +54,10 @@ fn open_shm(name: &str, min_len: usize) -> File {
         .metadata()
         .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
         .len() as usize;
-    if len < min_len {
+    if len != min_len {
         panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
     }
     file
-}
-
-fn get_robot() -> Robot<FeetechBusConfig, 6, 6> {
-    Robot {
-        command: [JointCommand::default(); 6],
-        state: [JointState::default(); 6],
-        joint_config: [JointConfig::default(); 6],
-        actuator_config: [
-            FeetechServoConfig { id: 1, ..Default::default() },
-            FeetechServoConfig { id: 2, ..Default::default() },
-            FeetechServoConfig { id: 3, ..Default::default() },
-            FeetechServoConfig { id: 4, ..Default::default() },
-            FeetechServoConfig { id: 5, ..Default::default() },
-            FeetechServoConfig { id: 6, ..Default::default() },
-        ],
-    }
 }
 
 fn main() {
@@ -74,76 +66,37 @@ fn main() {
 
     let shm_file = open_shm(
         &format!("/{node}"),
-        size_of::<JointTable<6>>(),
+        size_of::<Table<32>>(),
     );
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let ass: &mut JointTable<6> = unsafe {
-        &mut *(table_map.as_ptr() as *mut JointTable<6>)
+    let ass: &mut Table<32> = unsafe {
+        &mut *(table_map.as_ptr() as *mut Table<32>)
     };
 
-    let target_vid = 0x1a86;
-    let target_pid = 0x55d3;
-
-    let robot = get_robot();
+    let mut robot = get_robot();
+    let mut board = init();
 
     let last_command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
     let last_state_seq = ass.states.state_seq.load(core::sync::atomic::Ordering::SeqCst);
-    let mut channel = UsbPort {
-        target_pid,
-        target_vid,
-        baud_rate: 1_000_000,
-        port: None,
-    };
-    let link = AnyLink::Disconnected(Link::new(channel));
-    let mut controller = Controller { link: Some(link) };
 
-    let period = Duration::from_millis(20);
+    let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
+    let mut tick_count: u64 = 0;
 
     loop {
         next_tick += period;
 
-        controller.tick();
-
-        robot.sync_write(&ass.commands);
-        robot.sync_read(&mut ass.states);
-
         let command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
-        let state_seq = ass.states.state_seq.load(core::sync::atomic::Ordering::SeqCst);
-
-        let link = controller.link.as_mut().unwrap().as_connected_mut().unwrap();
-
         if (command_seq % 2) == 0 && command_seq != last_command_seq {
-            for (index, config) in robot.iter().enumerate() {
-                let mut driver = BusServoDriver {
-                    config: &config,
-                    link: link
-                };
-                let joint_trajectory_point = JointTrajectoryPoint {
-                    position: ass.commands.hw_commands[index],
-                    velocity: 0f64,
-                    acceleration: ass.commands.hw_accelerations[index],
-                };
-                let torque_status = TorqueStatus::from(ass.commands.hw_torque_enabled[index]);
-                if torque_status == TorqueStatus::Enabled {
-                    driver.set_joint_trajectory(joint_trajectory_point);
-                }
-                driver.set_torque_enable(torque_status);
-            }
+            robot.sync_write(&ass.commands);
         }
 
-        for (index, config) in robot.iter().enumerate() {
-            let mut driver = BusServoDriver {
-                config: &config,
-                link: link
-            };
-            if let Ok(position) = driver.get_position() {
-                ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-                ass.states.hw_positions[index] = position;
-                ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-            }
-        }
+        robot_tick(tick_count, &mut robot, &mut board);
+
+        ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        robot.sync_read(&mut ass.states);
+        ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         
         let now = std::time::Instant::now();
         if now < next_tick {
@@ -152,5 +105,6 @@ fn main() {
             eprintln!("Warning: tick took longer than expected {:?}", now - next_tick);
             next_tick = now;
         }
+        tick_count += 1;
     }
 }

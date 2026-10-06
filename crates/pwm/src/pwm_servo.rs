@@ -1,8 +1,9 @@
 use crate::pwm_channel::PwmChannel;
-use lucy_embedded_firmware_core::joint::{JointCommand, JointState, JointConfig};
-use lucy_embedded_firmware_core::actuator::{Actuator};
+use lucy_embedded_firmware_core::joint::{Command, State, CommandConfig};
+use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 use lucy_embedded_firmware_core::utils::map_range;
 use core::f32::consts::PI;
+use core::marker::PhantomData;
 
 pub enum PwmServoError {
     CommunicationError
@@ -24,34 +25,34 @@ impl Default for PwmServoConfig {
     }
 }
 
-pub struct PwmServoDriver<'a, A: PwmChannel> {
-    pub channel: &'a mut A,
-    pub actuator_config: &'a PwmServoConfig,
-    pub joint_command: &'a JointCommand,
-    pub joint_state: &'a JointState,
+pub struct PwmServoDriver<C: PwmChannel> {
+    _state: PhantomData<fn() -> C>,
+    pub config: &'static PwmServoConfig,
 }
 
-impl<'a, A: PwmChannel> Actuator for PwmServoDriver<'a, A> {
+impl<C: PwmChannel> PwmServoDriver<C> {
+    pub fn new(config: &'static PwmServoConfig) -> Self {
+        Self {
+            _state: PhantomData,
+            config,
+        }
+    }
+}
+
+impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
     type Error = PwmServoError;
+    type Bus = C;
 
-    fn enable(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn disable(&mut self) {
-    }
-
-    fn apply(&mut self) -> Result<(), Self::Error> {
+    fn update(&mut self, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
         let pulse = (map_range(
-            self.joint_command.position,
+            command[0].position,
             0f64,
-            self.actuator_config.amplitude,
-            self.actuator_config.min_pulse as f64,
-            self.actuator_config.max_pulse as f64,
+            self.config.amplitude,
+            self.config.min_pulse as f64,
+            self.config.max_pulse as f64,
         ) + 0.5) as u16;
 
-        self.channel
-            .set_pwm(pulse)
+        bus.set_pwm(pulse)
             .map_err(|_| PwmServoError::CommunicationError)?;
         Ok(())
     }

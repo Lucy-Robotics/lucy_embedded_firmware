@@ -1,0 +1,8 @@
+chip: rp2040
+
+uart:
+  uart_a: { peripheral: uart0, tx: gpio0, rx: gpio1 }
+
+pwm:
+  pwm_0: { slice: pwm0, channel: a, pin: gpio16 }
+  pwm_1: { slice: pwm0, channel: a, pin: gpio17 }

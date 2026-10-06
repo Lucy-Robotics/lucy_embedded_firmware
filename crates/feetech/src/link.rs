@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
 use core::result::Result;
+use core::option::Option;
 
 use crate::serial_channel::SerialChannel;
 
@@ -11,6 +12,7 @@ pub struct Link<State, C: SerialChannel> {
     pub channel: C,
 }
 
+/*
 impl<C: SerialChannel> Link<Disconnected, C> {
     pub fn new(channel: C) -> Self {
         Self {
@@ -76,3 +78,4 @@ impl<C: SerialChannel> Controller<C> {
         });
     }
 }
+*/
