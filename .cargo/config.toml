@@ -1,0 +1,9 @@
+# Applied when cargo's CWD is this firmware workspace (or a subdirectory).
+# Package-local firmwares/*/.cargo/config.toml alone is ignored when building
+# via --manifest-path from lucy_ws root (cargo only walks up from CWD).
+[target.thumbv6m-none-eabi]
+runner = "elf2uf2-rs -d"
+rustflags = [
+    "-C", "link-arg=--nmagic",
+    "-C", "link-arg=-Tlink.x",
+]
