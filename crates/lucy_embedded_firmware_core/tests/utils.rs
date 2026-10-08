@@ -1,6 +1,4 @@
-use lucy_embedded_firmware_core::utils::{
-    deg_to_millirad, map_range, millirad_to_deg, millirad_to_pulse,
-};
+use lucy_embedded_firmware_core::utils::{clamp_pulse, map_range, rad_to_pulse};
 
 #[test]
 fn map_range_endpoints() {
@@ -17,27 +15,35 @@ fn map_range_midpoint_and_clamp() {
 }
 
 #[test]
-fn millirad_encoding_roundtrip_90_deg() {
-    let mr = deg_to_millirad(90.0);
-    assert!((mr as i32 - 1571).abs() <= 1, "90° millirad anomaly: {mr}");
-    let back = millirad_to_deg(mr);
-    assert!((back - 90.0).abs() < 0.1, "roundtrip anomaly: {back}");
+fn rad_to_pulse_midpoints() {
+    let mid_pi = rad_to_pulse(
+        core::f32::consts::FRAC_PI_2,
+        0.0,
+        core::f32::consts::PI,
+        1250,
+        2500,
+    );
+    assert_eq!(mid_pi, 1875, "π servo midpoint anomaly: {mid_pi}");
+
+    let mid_3pi2 = rad_to_pulse(
+        3.0 * core::f32::consts::FRAC_PI_2 / 2.0,
+        0.0,
+        3.0 * core::f32::consts::FRAC_PI_2,
+        1250,
+        2500,
+    );
+    assert_eq!(mid_3pi2, 1875, "3π/2 servo midpoint anomaly: {mid_3pi2}");
 }
 
 #[test]
-fn millirad_to_pulse_midpoints() {
-    let mid_180 = millirad_to_pulse(deg_to_millirad(90.0), 0, 180, 1250, 2500);
-    assert_eq!(mid_180, 1875, "180° servo midpoint anomaly: {mid_180}");
-
-    let mid_270 = millirad_to_pulse(deg_to_millirad(135.0), 0, 270, 1250, 2500);
-    assert_eq!(mid_270, 1875, "270° servo midpoint anomaly: {mid_270}");
-
-    let mid_300 = millirad_to_pulse(deg_to_millirad(150.0), 0, 300, 1250, 2500);
-    assert_eq!(mid_300, 1875, "300° servo midpoint anomaly: {mid_300}");
+fn rad_to_pulse_half_step_rounds() {
+    let pulse = rad_to_pulse(1.0, 0.0, 4.0, 1250, 2500);
+    assert_eq!(pulse, 1563, "half-step rounding anomaly: {pulse}");
 }
 
 #[test]
-fn millirad_to_pulse_half_step_rounds() {
-    let pulse = millirad_to_pulse(deg_to_millirad(45.0), 0, 180, 1250, 2500);
-    assert_eq!(pulse, 1562, "half-step rounding anomaly: {pulse}");
+fn clamp_pulse_window() {
+    assert_eq!(clamp_pulse(100, 1250, 2500), 1250);
+    assert_eq!(clamp_pulse(3000, 1250, 2500), 2500);
+    assert_eq!(clamp_pulse(1800, 1250, 2500), 1800);
 }
