@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU64};
+use portable_atomic::AtomicU64;
 
 #[repr(C, align(64))]
 pub struct CommandBlock<const N: usize> {

@@ -9,7 +9,6 @@ edition = "2024"
 
 [dependencies]
 lucy-embedded-firmware-core = { path = "../../crates/core" }
-#lucy-embedded-firmware-pwm = { path = "../../crates/pwm" }
 lucy-embedded-firmware-feetech = { path = "../../crates/feetech" }
 crc = "3.4.0"
 modbus-core = "0.2.0"

@@ -3,8 +3,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use builder::build_config;
-
 fn main() {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
 

@@ -1,12 +1,10 @@
 use std::fs::File;
-use std::time::Duration;
-use core::option::{Option};
 
 use memmap2::MmapMut;
 
-use lucy_embedded_firmware_core::data::{Table};
+use lucy_embedded_firmware_core::data::{Table, StateBlock};
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use crc::{Crc, CRC_16_MODBUS};
+use lucy_embedded_firmware_communication::{encode_frame, framed_len, read_frame};
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
@@ -14,15 +12,35 @@ use std::os::fd::FromRawFd;
 mod usb_port;
 use usb_port::{UsbPort, UsbPortConfig};
 
-const TABLE_CRC: Crc<u16> = Crc::<u16>::new(&CRC_16_MODBUS);
+const STATE_BYTES: usize = size_of::<StateBlock<32>>();
 
-fn table_as_bytes<const N: usize>(table: &Table<N>) -> &[u8] {
+fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
         core::slice::from_raw_parts(
-            table as *const Table<N> as *const u8,
-            size_of::<Table<N>>(),
+            value as *const T as *const u8,
+            size_of::<T>(),
         )
     }
+}
+
+fn struct_as_bytes_mut<T>(value: &mut T) -> &mut [u8] {
+    unsafe {
+        core::slice::from_raw_parts_mut(
+            value as *mut T as *mut u8,
+            size_of::<T>(),
+        )
+    }
+}
+
+fn read_framed_payload(port: &mut UsbPort, payload_len: usize) -> Option<Vec<u8>> {
+    let mut frame = vec![0u8; payload_len + 2];
+    let ok = read_frame(|buf| port.port.read_exact(buf), &mut frame).ok()?;
+    if !ok {
+        return None;
+    }
+
+    frame.truncate(payload_len);
+    Some(frame)
 }
 
 fn node_name() -> String {
@@ -69,17 +87,21 @@ fn main() {
         &mut *(table_map.as_ptr() as *mut Table<32>)
     };
 
-    let usb_config = UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000);
+    let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000);
     let mut port = usb_config.open().expect("Failed to initialize USB Port");
 
     loop {
-        let payload = table_as_bytes(ass);
-        let crc = TABLE_CRC.checksum(payload);
+        let payload = struct_as_bytes(&ass.commands);
+        let mut frame = vec![0u8; framed_len(payload.len())];
+        encode_frame(payload, &mut frame);
 
-        let mut frame = Vec::with_capacity(payload.len() + 2);
-        frame.extend_from_slice(payload);
-        frame.extend_from_slice(&crc.to_le_bytes());
+        port.write(&frame).expect("Failed to write commands over serial port");
 
-        port.write(&frame).expect("Failed to write table over serial port");
+        match read_framed_payload(&mut port, STATE_BYTES) {
+            Some(payload) => {
+                struct_as_bytes_mut(&mut ass.states).copy_from_slice(&payload);
+            }
+            None => eprintln!("Failed to read states frame from rp2040, dropping"),
+        }
     }
 }

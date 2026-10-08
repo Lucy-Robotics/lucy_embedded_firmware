@@ -1,7 +1,6 @@
 use crate::serial_channel::SerialChannel;
-//use crate::link::{AnyLink, Link, Connected, Disconnected};
 
-use lucy_embedded_firmware_core::actuator::{Actuator, ActuatorGroup};
+use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 use lucy_embedded_firmware_core::joint::{*};
 
 use lucy_embedded_firmware_core::utils::map_range;
@@ -367,9 +366,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             let magnitude = (raw & 0x3FF) as f64 / 1000.0;
             let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
             s.torque = sign * magnitude;
-            println!("Torque {}", s.torque);
         }
-        println!();
 
         Ok(())
     }

@@ -13,16 +13,6 @@ pub enum ActuatorState {
     Faulted,
 }
 
-pub trait Actuator {
-    type Error;
-    fn enable(&mut self) -> Result<(), Self::Error>;
-    fn disable(&mut self);
-
-    fn write(&mut self, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error>;
-    fn read(&mut self, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error>;
-    fn apply(&mut self, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error>;
-}
-
 pub trait ActuatorGroup {
     type Bus;
     type Error;
