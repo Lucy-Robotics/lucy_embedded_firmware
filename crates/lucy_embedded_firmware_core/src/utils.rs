@@ -17,35 +17,31 @@ pub fn map_range(val: f32, in_min: f32, in_max: f32, out_min: f32, out_max: f32)
     result.clamp(min_bound, max_bound)
 }
 
-/// Convert milliradians (`rad * 1000`) to degrees.
-pub fn millirad_to_deg(angle_millirad: u16) -> f32 {
-    (angle_millirad as f32 / 1000.0).to_degrees()
-}
-
-/// Convert degrees to milliradians (`rad * 1000`).
-///
-/// `no_std` friendly: avoid `f32::round()` — use `(x + 0.5) as u16` for positive values.
-pub fn deg_to_millirad(angle_deg: f32) -> u16 {
-    (angle_deg.to_radians() * 1000.0 + 0.5) as u16
-}
-
-/// Map an angle in milliradians to a PWM duty count with rounding.
-pub fn millirad_to_pulse(
-    angle_millirad: u16,
-    min_angle_deg: u16,
-    max_angle_deg: u16,
+/// Map an angle in **radians** to a PWM / bus pulse (µs or STS ticks) with rounding.
+pub fn rad_to_pulse(
+    angle_rad: f32,
+    min_angle_rad: f32,
+    max_angle_rad: f32,
     min_pulse: u16,
     max_pulse: u16,
 ) -> u16 {
-    let angle_deg = millirad_to_deg(angle_millirad);
-    let clamped = angle_deg.clamp(min_angle_deg as f32, max_angle_deg as f32);
+    let lo = min_angle_rad.min(max_angle_rad);
+    let hi = min_angle_rad.max(max_angle_rad);
+    let clamped = angle_rad.clamp(lo, hi);
     (map_range(
         clamped,
-        min_angle_deg as f32,
-        max_angle_deg as f32,
+        min_angle_rad,
+        max_angle_rad,
         min_pulse as f32,
         max_pulse as f32,
     ) + 0.5) as u16
+}
+
+/// Clamp a wire pulse into the configured window.
+pub fn clamp_pulse(pulse: u16, min_pulse: u16, max_pulse: u16) -> u16 {
+    let lo = min_pulse.min(max_pulse);
+    let hi = min_pulse.max(max_pulse);
+    pulse.clamp(lo, hi)
 }
 
 #[cfg(test)]
@@ -67,30 +63,37 @@ mod tests {
     }
 
     #[test]
-    fn millirad_encoding_roundtrip_90_deg() {
-        // 90° → π/2 rad → ~1571 millirad
-        let mr = deg_to_millirad(90.0);
-        assert!((mr as i32 - 1571).abs() <= 1, "90° millirad anomaly: {mr}");
-        let back = millirad_to_deg(mr);
-        assert!((back - 90.0).abs() < 0.1, "roundtrip anomaly: {back}");
+    fn rad_to_pulse_midpoints() {
+        let mid_pi = rad_to_pulse(
+            core::f32::consts::FRAC_PI_2,
+            0.0,
+            core::f32::consts::PI,
+            1250,
+            2500,
+        );
+        assert_eq!(mid_pi, 1875, "π servo midpoint anomaly: {mid_pi}");
+
+        let mid_3pi2 = rad_to_pulse(
+            3.0 * core::f32::consts::FRAC_PI_2 / 2.0,
+            0.0,
+            3.0 * core::f32::consts::FRAC_PI_2,
+            1250,
+            2500,
+        );
+        assert_eq!(mid_3pi2, 1875, "3π/2 servo midpoint anomaly: {mid_3pi2}");
     }
 
     #[test]
-    fn millirad_to_pulse_midpoints() {
-        let mid_180 = millirad_to_pulse(deg_to_millirad(90.0), 0, 180, 1250, 2500);
-        assert_eq!(mid_180, 1875, "180° servo midpoint anomaly: {mid_180}");
-
-        let mid_270 = millirad_to_pulse(deg_to_millirad(135.0), 0, 270, 1250, 2500);
-        assert_eq!(mid_270, 1875, "270° servo midpoint anomaly: {mid_270}");
-
-        let mid_300 = millirad_to_pulse(deg_to_millirad(150.0), 0, 300, 1250, 2500);
-        assert_eq!(mid_300, 1875, "300° servo midpoint anomaly: {mid_300}");
-    }
-
-    #[test]
-    fn millirad_to_pulse_half_step_rounds() {
-        // 45° of 0..180 → 1562.5 → rounds to 1563 with +0.5 cast
-        let pulse = millirad_to_pulse(deg_to_millirad(45.0), 0, 180, 1250, 2500);
+    fn rad_to_pulse_half_step_rounds() {
+        // Map 1 of 0..4 rad span → 1562.5 → rounds to 1563 with +0.5 cast
+        let pulse = rad_to_pulse(1.0, 0.0, 4.0, 1250, 2500);
         assert_eq!(pulse, 1563, "half-step rounding anomaly: {pulse}");
+    }
+
+    #[test]
+    fn clamp_pulse_window() {
+        assert_eq!(clamp_pulse(100, 1250, 2500), 1250);
+        assert_eq!(clamp_pulse(3000, 1250, 2500), 2500);
+        assert_eq!(clamp_pulse(1800, 1250, 2500), 1800);
     }
 }

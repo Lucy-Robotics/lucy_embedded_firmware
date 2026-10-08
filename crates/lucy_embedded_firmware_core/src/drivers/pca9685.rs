@@ -1,49 +1,28 @@
+//! PCA9685 I2C PWM expander stub (16 channels).
+//!
+//! Layout resolves `I2C0:PCA9685:N` channels; firmware [`I2cPwmBank`](in
+//! `rp2040_support`) processes Modbus until this driver is wired to a real
+//! [`crate::i2c::I2cChannel`].
 
-struct Pca9685<I2C> {
-    i2c: I2C,
-    address: u8,
+/// Default PCA9685 I2C 7-bit address.
+pub const PCA9685_DEFAULT_ADDR: u8 = 0x40;
+
+/// Register block size matches on-board PWM servos (cmd + pulse).
+pub const PCA9685_PWM_REGS: u16 = 2;
+
+/// Placeholder config shared with [`super::PwmServoConfig`] at the Modbus layer.
+/// Hardware init (prescale / mode) is not performed until I2C is connected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pca9685Config {
+    pub address: u8,
+    pub channel: u8,
 }
 
-impl<I2C: I2c> Pca9685<I2C> {
-    const fn new(i2c: I2C, address: u8) -> Self {
-        Pca9685 {
-            i2c: i2c,
-            address: address,
+impl Pca9685Config {
+    pub const fn new(channel: u8) -> Self {
+        Self {
+            address: PCA9685_DEFAULT_ADDR,
+            channel,
         }
     }
-
-    fn init(&mut self, frequency: u16) {
-        let divisor = 4096 * 50;
-        let prescale = ((25_000_000 + divisor / 2) / divisor - 1) as u8;
-        self.i2c.write(self.address, &[0x00, 0x10]).unwrap();
-        self.i2c.write(self.address, &[0xFE, prescale]).unwrap();
-        self.i2c.write(self.address, &[0x00, 0x20]).unwrap();
-        //delay.delay_us(500);
-        self.i2c.write(self.address, &[0x01, 0x04]).unwrap();
-    }
-
-    fn get_channel(&mut self, channel: u16) {
-
-    }
 }
-
-/*struct Pca9685Channel {
-    channel: u8
-}
-
-impl<I2C: I2c> PwmChannel for Pca9685Channel<I2C> {
-    fn set_pwm(&mut self, pulse: u16) {
-        let on = 0;
-        let off = pulse;
-        let reg = 0x06 + self.channel * 4;
-        let buffer = [
-            reg,
-            (on & 0xFF) as u8,
-            ((on >> 8) & 0x0F) as u8,
-            (off & 0xFF) as u8,
-            ((off >> 8) & 0x0F) as u8,
-        ];
-        self.i2c.write(0x40_u8, &buffer).unwrap();
-    }
-}*/
-
