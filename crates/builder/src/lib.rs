@@ -1,24 +1,4 @@
 //! YAML → Rust config codegen for RP2040 firmware builds.
-//!
-//! Expected `config.yaml` shape (per board):
-//! ```yaml
-//! board_id: rp2040_left_arm
-//! slave_address: 1
-//! actuators:
-//!   - id: left_shoulder_z
-//!     enabled: true
-//!     virtual_pin: 0
-//!     hardware:
-//!       driver: PwmServoConfig
-//!     modbus:
-//!       adapter: PwmServoModbusAdapter
-//!     attributes:
-//!       min_pulse: 1250
-//!       max_pulse: 2500
-//!       min_angle: 0
-//!       max_angle: 180
-//!       default_angle: 90
-//! ```
 
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
