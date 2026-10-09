@@ -1,5 +1,4 @@
 use crate::joint::{*};
-use crate::actuator::{*};
 use crate::data::{*};
 
 pub struct Robot<const M: usize> {

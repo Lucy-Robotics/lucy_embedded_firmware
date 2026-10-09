@@ -1,5 +1,5 @@
 [[bin]]
-name = "lucy-embedded-firmware-linux"
+name = "lucy-embedded-firmware-mcu-bridge"
 path = "src/main.rs"
 
 [package]

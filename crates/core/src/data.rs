@@ -26,3 +26,4 @@ pub struct Table<const N: usize> {
     pub states: StateBlock<N>,
     pub heartbeat: HeartbeatBlock,
 }
+

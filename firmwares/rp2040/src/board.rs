@@ -1,4 +1,5 @@
 use crate::channel::Rp2040UartChannel;
+use crate::channel::Rp2040PwmChannel;
 use crate::ws2812::QWs2812;
 use core::option::Option;
 
@@ -10,7 +11,7 @@ use rp2040_hal::{
     clocks,
     usb,
     pio,
-    timer,
+    pwm,
 
     Sio,
     Timer,
@@ -24,6 +25,9 @@ pub type Uart0Channel = Rp2040UartChannel<
     pac::UART0,
     (gpio::Pin<gpio::bank0::Gpio0, gpio::FunctionUart, gpio::PullDown>, gpio::Pin<gpio::bank0::Gpio1, gpio::FunctionUart, gpio::PullDown>)>;
 
+pub type Servo3Channel = Rp2040PwmChannel<pwm::Channel<pwm::Slice<pwm::Pwm1, pwm::FreeRunning>, pwm::A>>;
+
+
 pub struct Resources {
     // MANDATORY
     pub watchdog: Watchdog,
@@ -34,6 +38,7 @@ pub struct Resources {
 
     // GENERATED
     pub uart0: Uart0Channel,
+    pub servo3: Servo3Channel,
 }
 
 
@@ -67,6 +72,8 @@ pub fn init() -> Resources {
         &mut pac.RESETS,
     );
 
+    // Generated
+
     let tx = pins.gpio0.into_function::<gpio::FunctionUart>();
     let rx = pins.gpio1.into_function::<gpio::FunctionUart>();
     let dir = pins.gpio16.into_push_pull_output_in_state(gpio::PinState::Low);
@@ -80,6 +87,14 @@ pub fn init() -> Resources {
         clocks.peripheral_clock.freq(),
     ).unwrap();
 
+    let pwm_slices = pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    let mut pwm = pwm_slices.pwm1;
+    pwm.set_div_int(125);
+    pwm.set_top(20000 - 1);
+    pwm.channel_a.output_to(pins.gpio2.into_function::<gpio::FunctionPwm>());
+    pwm.enable();
+    let channel = pwm.channel_a;
+
     Resources {
         watchdog,
         usb_bus: Some(usb_bus),
@@ -91,6 +106,9 @@ pub fn init() -> Resources {
             dir,
             uart: uart0,
             timer,
-        }
+        },
+        servo3: Rp2040PwmChannel {
+            channel
+        },
     }
 }

@@ -1,9 +1,6 @@
 use core::result::Result;
-use core::error::Error;
 
 use crate::joint::{Command, State};
-
-// Command
 
 pub enum ActuatorState {
     Disabled,

@@ -5,7 +5,7 @@ use lucy_embedded_firmware_core::joint::{*};
 
 use lucy_embedded_firmware_core::utils::map_range;
 
-use core::f32::consts::{TAU, PI};
+use core::f32::consts::{TAU};
 use core::marker::PhantomData;
 
 // === Request builder ===
@@ -154,7 +154,7 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
 
     fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
         self.set_torque(bus, command)?;
-        self.set_position(bus, command, state)?;
+        self.set_position(bus, command)?;
         self.read_position(bus, state)?;
         match tick % 10 {
             0 => self.read_temperature(bus, state)?,
@@ -166,7 +166,7 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
 }
 
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
-    pub fn set_position(&mut self, bus: &mut S, command: &[Command], state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn set_position(&mut self, bus: &mut S, command: &[Command]) -> Result<(), FeetechBusError> {
         const SYNC_WRITE_CHUNK_LEN: usize = 7;
         const SYNC_WRITE_DATA_LEN: u8 = 6;
 
@@ -186,7 +186,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             let time: u16 = 0;
             let velocity = cmd.velocity as u16;
             let pulse = (map_range(
-                cmd.position as f64,
+                cmd.position,
                 0 as f64,
                 cfg.amplitude,
                 cfg.min_pulse as f64,

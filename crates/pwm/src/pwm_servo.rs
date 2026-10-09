@@ -1,6 +1,6 @@
 use crate::pwm_channel::PwmChannel;
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::joint::{Command, State, CommandConfig, TorqueStatus};
+use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
 use lucy_embedded_firmware_core::utils::map_range;
 use core::f32::consts::PI;
 use core::marker::PhantomData;
@@ -43,7 +43,7 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
     type Error = PwmServoError;
     type Bus = C;
 
-    fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
+    fn update(&mut self, _tick: u64, bus: &mut Self::Bus, command: &mut [Command], _state: &mut [State]) -> Result<(), Self::Error> {
         self.set_torque(bus, command)?;
         self.set_pwm(bus, command)?;
         Ok(())

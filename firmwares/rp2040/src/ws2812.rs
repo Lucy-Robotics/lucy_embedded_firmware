@@ -1,6 +1,5 @@
 use rp2040_hal::{
     gpio,
-    pac,
     pio,
     timer,
 };
