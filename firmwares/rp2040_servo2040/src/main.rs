@@ -13,7 +13,6 @@
 #![no_std]
 #![no_main]
 
-mod board_layout;
 mod config;
 
 use config::{
