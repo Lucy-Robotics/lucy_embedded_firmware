@@ -4,8 +4,8 @@ use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 
 use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusConfig, FeetechBusDriver};
 
-use crate::board::Uart0Channel;
-use crate::board::Resources;
+use crate::usb_port::UsbPort;
+use crate::resources::Resources;
 
 use core::f64::consts::{PI, TAU};
 
@@ -40,13 +40,12 @@ pub fn get_robot() -> Robot<6> {
 pub fn robot_tick(
     tick: u64,
     robot: &mut Robot<6>,
-    resources: &mut Resources) {
-
-    let mut driver = FeetechBusDriver::<Uart0Channel, 6>::new(&FEETECH_0);
-
+    resources: &mut Resources,
+) {
+    let mut driver: FeetechBusDriver<UsbPort, 6> = FeetechBusDriver::<UsbPort, 6>::new(&FEETECH_0);
     driver.update(
         tick,
-        &mut resources.uart0,
+        &mut resources.usb0,
         &mut robot.joints_command[0..6],
         &mut robot.joints_state[0..6],
     );

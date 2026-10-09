@@ -1,0 +1,15 @@
+[package]
+name = "lucy-embedded-firmware-pwm"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+lucy-embedded-firmware-core = { path = "../../crates/core" }
+crc = "3.4.0"
+serde = { version =  "1.0", default-features = false, features = ["derive"], optional = true }
+
+[build-dependencies]
