@@ -1,10 +1,3 @@
-//! Pressure sensor Modbus placeholder (2 registers: cmd + value).
-//!
-//! Real ADC sampling is not wired yet. Config codegen still emits
-//! [`PressureSensorConfig`] and reserves register blocks so firmware builds
-//! when YAML lists pressure sensors. The adapter clears `cmd` and leaves
-//! `value` at the last placeholder reading (0 until a future ADC driver).
-
 use crate::modbus::{ModbusAdapter, RegisterView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +8,6 @@ pub struct PressureSensorConfig {
     pub max_value: u16,
 }
 
-/// Placeholder driver — no hardware ADC until sensors are implemented.
 pub struct PressureSensorDriver {
     pub config: PressureSensorConfig,
     pub last_value: u16,
@@ -29,7 +21,6 @@ impl PressureSensorDriver {
         }
     }
 
-    /// Returns the last placeholder value (clamped to config range).
     pub fn read_placeholder(&mut self) -> u16 {
         let clamped = self
             .last_value
@@ -39,10 +30,6 @@ impl PressureSensorDriver {
     }
 }
 
-/// Holding registers: `[cmd, value]`.
-///
-/// - cmd `1` = refresh placeholder into `value` (no ADC yet)
-/// - value is written by the adapter for host reads
 pub struct PressureSensorModbusAdapter {
     pub base_register: u16,
     pub cmd_reg_off: u16,
