@@ -4,9 +4,8 @@ use crate::schema::{
     AssignmentPlan, BuildError, ConfigValue, DeviceAssignment, DeviceKind, FirmwareConfig,
     BUS_SERVO_REGS, PRESSURE_SENSOR_REGS, PWM_SERVO_REGS,
 };
-use lucy_embedded_firmware_core::board_layout::{
-    layout_for_board, BoardLayout, HardwareIdentity,
-};
+use crate::board_layouts::layout_for_board;
+use lucy_embedded_firmware_core::board_layout::{BoardLayout, HardwareIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Servo2040 `HAS_BUS` claims GPIO0–2 for UART0 TX/RX/DIR (Servo1–3 silk).
