@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/*", "firmwares/*"]
+resolver = "2"
+
+[workspace.dependencies]
+modbus-core = { version = "0.3", default-features = false }
