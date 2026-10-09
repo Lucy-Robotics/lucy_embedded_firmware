@@ -43,7 +43,8 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
     type Error = PwmServoError;
     type Bus = C;
 
-    fn update(&mut self, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
+    fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
+
         let pulse = (map_range(
             command[0].position,
             0f64,

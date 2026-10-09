@@ -10,7 +10,6 @@ serde = ["dep:serde"]
 [dependencies]
 lucy-embedded-firmware-core = { path = "../../crates/core" }
 crc = "3.4.0"
-modbus-core = "0.2.0"
 serde = { version =  "1.0", default-features = false, features = ["derive"], optional = true }
 
 [build-dependencies]
