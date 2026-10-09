@@ -155,10 +155,10 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
     fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
         self.set_torque(bus, command)?;
         self.set_position(bus, command, state)?;
-        self.read_positions(bus, state)?;
+        self.read_position(bus, state)?;
         match tick % 10 {
-            0 => self.read_temperatures(bus, state)?,
-            1 => self.read_torques(bus, state)?,
+            0 => self.read_temperature(bus, state)?,
+            1 => self.read_torque(bus, state)?,
             _ => {}
         };
         Ok(())
@@ -274,7 +274,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
 }
 
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
-    pub fn read_temperatures(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_temperature(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_TEMP: u8 = 0x3F;
         const RESPONSE_LEN: usize = 7;
 
@@ -321,7 +321,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         Ok(())
     }
 
-    pub fn read_torques(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_torque(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_LOAD: u8 = 0x3C;
         const RESPONSE_LEN: usize = 8;
 
@@ -371,7 +371,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         Ok(())
     }
 
-    pub fn read_positions(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_position(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_PRESENT_POSITION: u8 = 0x38;
         const RESPONSE_LEN: usize = 8;
 

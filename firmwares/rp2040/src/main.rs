@@ -6,6 +6,7 @@ use portable_atomic::AtomicU64;
 use lucy_embedded_firmware_core::data::{CommandBlock, StateBlock};
 
 use rp2040_hal::fugit::MicrosDurationU64;
+use rp2040_hal::fugit::ExtU32;
 
 use usb_device::{class_prelude::*, prelude::*};
 use usbd_serial::SerialPort;
@@ -22,7 +23,6 @@ use panic_halt as _;
 
 mod ws2812;
 mod channel;
-mod resources;
 mod board;
 use board::init;
 mod config;
@@ -93,8 +93,10 @@ fn main() -> ! {
         .build();
 
     ws2812.set_color(0, RGB8::new(0, 50, 0));
+    resources.watchdog.start(1_000.millis());
 
     loop {
+        resources.watchdog.feed();
         let tick_start = resources.timer.get_counter().ticks();
         usb_dev.poll(&mut [&mut serial, &mut reset]);
 

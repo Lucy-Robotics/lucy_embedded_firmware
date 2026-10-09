@@ -12,15 +12,16 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        target = "thumbv6m-none-eabi";
-        rustToolchain = fenix.packages.${system}.combine [
+        targets = [
+          "thumbv6m-none-eabi"
+        ];
+        rustToolchain = fenix.packages.${system}.combine ([
           fenix.packages.${system}.stable.cargo
           fenix.packages.${system}.stable.rustc
           fenix.packages.${system}.stable.clippy
           fenix.packages.${system}.stable.rustfmt
           fenix.packages.${system}.stable.rust-src
-          fenix.packages.${system}.targets.${target}.stable.rust-std
-        ];
+        ] ++ (map (t: fenix.packages.${system}.targets.${t}.stable.rust-std) targets));
       in
       {
         devShells.default = pkgs.mkShell {
@@ -33,8 +34,6 @@
             pkgs.probe-rs-tools
             pkgs.elf2uf2-rs
             pkgs.picotool
-          ];
-          nativeBuildInputs = [
             pkgs.pkg-config
           ];
           buildInputs = [

@@ -19,9 +19,6 @@ use rp2040_hal::{
 };
 use rp2040_hal::fugit::RateExtU32;
 
-use usb_device::{class_prelude::*, prelude::*};
-use usbd_serial::SerialPort;
-
 pub type Uart0Channel = Rp2040UartChannel<
     gpio::Pin<gpio::bank0::Gpio16, gpio::FunctionSioOutput, gpio::PullDown>,
     pac::UART0,
