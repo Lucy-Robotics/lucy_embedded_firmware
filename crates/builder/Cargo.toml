@@ -8,5 +8,6 @@ lucy_embedded_firmware_core = { path = "../lucy_embedded_firmware_core", feature
 heck = "0.5.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
+serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.34"
-syn = "3.0.4"
+syn = "2.0"
