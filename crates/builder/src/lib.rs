@@ -1,5 +1,7 @@
 //! YAML → Rust config codegen for RP2040 firmware builds.
 
+pub mod board_layouts;
+
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
