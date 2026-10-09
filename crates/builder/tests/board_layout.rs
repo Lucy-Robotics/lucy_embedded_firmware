@@ -53,19 +53,19 @@ fn layout_for_board_classes() {
     assert!(layout_for_board("internal_servo_i2c_pwm", None).is_some());
     assert!(layout_for_board("bus_servo_only", None).is_some());
     assert!(layout_for_board("", Some("firmwares/rp2040_servo2040")).is_some());
+    let layout = layout_for_board("bus_servo_only", Some("firmwares/rp2040_servo2040")).unwrap();
     assert_eq!(
-        layout_for_board("bus_servo_only", Some("firmwares/rp2040_servo2040"))
-            .unwrap()
-            .resolve("UART0:1"),
+        layout.resolve("UART0:1"),
         Some(HardwareIdentity::UartBus {
             uart: 0,
             device_id: Some(1)
         })
     );
     assert_eq!(
-        layout_for_board("bus_servo_only", Some("firmwares/rp2040_servo2040"))
-            .unwrap()
-            .resolve("Servo1"),
-        None
+        layout.resolve("Servo1"),
+        Some(HardwareIdentity::PwmGpio {
+            servo_index: 1,
+            gpio: 0
+        })
     );
 }

@@ -59,27 +59,14 @@ impl BoardLayout for Rp2040Servo2040Layout {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Rp2040BusServoLayout;
-
-impl BoardLayout for Rp2040BusServoLayout {
-    fn resolve(&self, channel: &str) -> Option<HardwareIdentity> {
-        if let Some((uart, device_id)) = parse_uart_channel(channel) {
-            return Some(HardwareIdentity::UartBus { uart, device_id });
-        }
-        None
-    }
-}
-
 pub fn layout_for_board(
     board_class: &str,
     firmware_crate: Option<&str>,
 ) -> Option<&'static dyn BoardLayout> {
     match board_class {
-        "internal_servo_only" | "internal_servo_i2c_pwm" => {
+        "internal_servo_only" | "internal_servo_i2c_pwm" | "bus_servo_only" => {
             return Some(&Rp2040Servo2040Layout);
         }
-        "bus_servo_only" => return Some(&Rp2040BusServoLayout),
         _ => {}
     }
     if let Some(path) = firmware_crate {
