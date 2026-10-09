@@ -27,3 +27,13 @@ Cargo.lock
 #.idea/
 
 *.uf2
+
+# Pipeline firmware build tree (UF2 + intermediates under firmware.build_dir)
+build/
+
+# Generated / pipeline-installed board configs (source of truth: robot package → pipeline).
+# Canonical copies live under config/config_<board_id>.yaml; build copies into the crate.
+# Never commit these — regenerate via lucy_config_pipeline / generator.
+config/*
+!config/README.md
+firmwares/*/config.yaml
