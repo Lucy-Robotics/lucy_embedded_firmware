@@ -39,13 +39,16 @@ mod generated_config;
 use generated_config::{BUS_SERVO_BASE, BUS_SERVO_BLOCK, BUS_SERVO_SLOTS};
 
 use lucy_embedded_firmware_core::{
-    pwm::{PwmChannel},
+    pwm::PwmChannel,
     uart::UartChannel,
     drivers::{
         pwm_servo::{PwmServoDriver, PwmServoConfig, PwmServoModbusAdapter},
         bus_servo::{BusServoDriver, BusServoConfig, BusServoModbusAdapter},
     },
-    modbus::{ModbusError, ModbusAdapter, RegisterView, RegisterTable, Slave, parse_modbus_frame, route_modbus_request}
+    modbus::{
+        ModbusError, ModbusAdapter, RegisterView, RegisterTable, Slave,
+        inter_frame_delay_us, parse_modbus_frame, route_modbus_request,
+    },
 };
 
 use embedded_hal::{
@@ -225,9 +228,11 @@ fn main() -> ! {
 
 
     let mut rx_buf = [0u8; 256];
+    let mut tx_buf = [0u8; 256];
     let mut rx_len = 0;
     let mut rx_active_timer = false;
     let mut last_rx_micros: u64 = 0;
+    let frame_gap_us = inter_frame_delay_us(115_200);
 
     leds[1] = RGB8 { r: 0, g: 10, b: 0 };
     ws.write(leds.iter().cloned()).unwrap();
@@ -255,40 +260,25 @@ fn main() -> ! {
                 }
             }
         }
-        if rx_active_timer && (now.wrapping_sub(last_rx_micros) >= 3000) {
+        if rx_active_timer && (now.wrapping_sub(last_rx_micros) >= frame_gap_us) {
             rx_active_timer = false;
-            if rx_len >= 8 {
+            if rx_len >= 4 {
                 let raw_request = parse_modbus_frame(&slave, &rx_buf[..rx_len]);
                 match raw_request {
                     Ok(request) => {
-                        let tmp = route_modbus_request(&rt, request).unwrap_or(0);
-
-                        let mut raw_buf = [0u8; 64];
-                        let mut writer = BufferWriter::new(&mut raw_buf);
-                        let _ = write!(writer, "Request {} received and processed\n", tmp as u16);
-
-                        serial.write(writer.as_bytes());
+                        if let Ok(n) =
+                            route_modbus_request(slave.address, &rt, request, &mut tx_buf)
+                        {
+                            let _ = serial.write(&tx_buf[..n]);
+                        }
                     }
-                    Err(error) => match error {
-                        ModbusError::InvalidAddress => {
-                            serial.write(b"InvalidAddress\n");
-                        }
-                        ModbusError::InvalidFrame => {
-                            serial.write(b"InvalidFrame\n");
-                        }
-                        ModbusError::CrcError => {
-                            serial.write(b"CrcError\n");
-                        }
-                        ModbusError::UnknownOpcode => {
-                            serial.write(b"UnknownOpcode\n");
-                        }
-                        _ => {
-                            serial.write(b"Error\n");
-                        }
+                    Err(ModbusError::InvalidAddress) => {
+                        // Silence for other slaves (RTU spec).
+                    }
+                    Err(_) => {
+                        // Malformed frames: no response.
                     }
                 }
-            } else {
-                serial.write(b"Skipping");
             }
             rx_len = 0;
         }
