@@ -1,7 +1,7 @@
-pub fn map_range(val: f32, in_min: f32, in_max: f32, out_min: f32, out_max: f32) -> f32 {
+pub fn map_range(val: f64, in_min: f64, in_max: f64, out_min: f64, out_max: f64) -> f64 {
     let in_span = in_max - in_min;
 
-    if in_span.abs() < f32::EPSILON {
+    if in_span.abs() < f64::EPSILON {
         return out_min;
     }
 
@@ -35,10 +35,10 @@ pub fn millirad_to_pulse(
     let angle_deg = millirad_to_deg(angle_millirad);
     let clamped = angle_deg.clamp(min_angle_deg as f32, max_angle_deg as f32);
     (map_range(
-        clamped,
-        min_angle_deg as f32,
-        max_angle_deg as f32,
-        min_pulse as f32,
-        max_pulse as f32,
+        clamped as f64,
+        min_angle_deg as f64,
+        max_angle_deg as f64,
+        min_pulse as f64,
+        max_pulse as f64,
     ) + 0.5) as u16
 }
