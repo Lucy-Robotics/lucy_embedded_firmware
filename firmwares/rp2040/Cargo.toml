@@ -1,3 +1,8 @@
+[[bin]]
+name = "lucy-embedded-firmware-rp2040"
+test = false
+bench = false
+
 [package]
 name = "lucy-embedded-firmware-rp2040"
 version = "0.1.0"
