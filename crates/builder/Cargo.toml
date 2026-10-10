@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lucy_embedded_firmware_core = { path = "../lucy_embedded_firmware_core", features = ["serde"] }
+lucy-embedded-firmware-core = { path = "../../crates/core", features = ["serde"] }
 heck = "0.5.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
