@@ -35,10 +35,10 @@ pub fn millirad_to_pulse(
     let angle_deg = millirad_to_deg(angle_millirad);
     let clamped = angle_deg.clamp(min_angle_deg as f32, max_angle_deg as f32);
     (map_range(
-        clamped,
-        min_angle_deg as f32,
-        max_angle_deg as f32,
-        min_pulse as f32,
-        max_pulse as f32,
+        clamped as f64,
+        min_angle_deg as f64,
+        max_angle_deg as f64,
+        min_pulse as f64,
+        max_pulse as f64,
     ) + 0.5) as u16
 }
