@@ -1,0 +1,18 @@
+[[bin]]
+name = "lucy-embedded-firmware-mcu-bridge"
+path = "src/main.rs"
+
+[package]
+name = "lucy-embedded-firmware-mcu-bridge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lucy-embedded-firmware-core = { path = "../../crates/core" }
+lucy-embedded-firmware-feetech = { path = "../../crates/feetech" }
+lucy-embedded-firmware-communication = { path = "../../crates/communication" }
+serialport = "4.10.0"
+memmap2 = "0.9.11"
+libc = "0.2.189"
+zerocopy = "0.8.57"
+bytemuck = "1.25.2"

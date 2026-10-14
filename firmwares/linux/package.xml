@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lucy_embedded_firmware_x86_64</name>
+  <version>0.1.0</version>
+  <description>x86-64</description>
+  <maintainer email="contact@sentience-robotics.fr">Lucy Robotics Team</maintainer>
+  <license>GPL-3.0</license>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
