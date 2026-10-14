@@ -41,8 +41,6 @@ pub struct Resources {
     pub servo3: Servo3Channel,
 }
 
-
-
 pub fn init() -> Resources {
     let core = cortex_m::Peripherals::take().unwrap();
     let mut pac = pac::Peripherals::take().unwrap();

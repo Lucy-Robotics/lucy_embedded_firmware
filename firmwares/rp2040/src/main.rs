@@ -137,7 +137,7 @@ fn main() -> ! {
         .strings(&[StringDescriptors::default()
             .manufacturer("Pimoroni")
             .product("Servo2040 Serial")
-            .serial_number("E0C9125B0D9B")])
+            .serial_number(env!("DEVICE_SERIAL_NUMBER"))])
         .unwrap()
         .device_class(usbd_serial::USB_CLASS_CDC)
         .composite_with_iads()

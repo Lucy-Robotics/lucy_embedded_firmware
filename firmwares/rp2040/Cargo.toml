@@ -8,6 +8,9 @@ name = "lucy-embedded-firmware-rp2040"
 version = "0.1.0"
 edition = "2024"
 
+[env]
+DEVICE_SERIAL_NUMBER = "E0C9125B0D9B"
+
 [profile.dev]
 panic = "abort"
 
