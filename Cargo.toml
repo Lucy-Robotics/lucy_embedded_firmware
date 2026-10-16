@@ -4,3 +4,10 @@ resolver = "2"
 
 [workspace.dependencies]
 modbus-core = { version = "0.3", default-features = false }
+
+# Nested package profiles are ignored; keep abort-on-panic for RP2040 here.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
