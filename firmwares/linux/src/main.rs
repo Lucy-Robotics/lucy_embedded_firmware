@@ -20,6 +20,12 @@ use usb_port::UsbPort;
 mod config;
 use config::{get_robot, robot_tick};
 
+/// Must match HI ``MAX_ACTUATORS`` / ``ActuatorSharedState`` size.
+const SHM_ACTUATORS: usize = 10;
+
+const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
+const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn node_name() -> String {
     std::env::args()
         .nth(1)
@@ -28,25 +34,39 @@ fn node_name() -> String {
         .unwrap_or_else(|| "lucy".to_string())
 }
 
-fn open_shm(name: &str, min_len: usize) -> File {
+fn open_shm(name: &str, expected_len: usize) -> File {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
-    let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
-    if fd == -1 {
-        panic!(
-            "shm_open(\"{name}\") failed: {}. Is the ROS 2 stack running with node_name={}?",
-            std::io::Error::last_os_error(),
-            name.trim_start_matches('/').split('.').next().unwrap_or(name),
-        );
+    let deadline = std::time::Instant::now() + SHM_OPEN_TIMEOUT;
+    let mut last_err = std::io::Error::from_raw_os_error(0);
+
+    loop {
+        let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
+        if fd != -1 {
+            let file = unsafe { File::from_raw_fd(fd) };
+            let len = file
+                .metadata()
+                .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
+                .len() as usize;
+            if len != expected_len {
+                panic!(
+                    "shm object \"{name}\" is {len} bytes, expected {expected_len} \
+                     (HI MAX_ACTUATORS / Table<{SHM_ACTUATORS}>)"
+                );
+            }
+            return file;
+        }
+        last_err = std::io::Error::last_os_error();
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(SHM_OPEN_RETRY);
     }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let len = file
-        .metadata()
-        .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
-        .len() as usize;
-    if len != min_len {
-        panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
-    }
-    file
+
+    panic!(
+        "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {last_err}. \
+         Is the ROS 2 stack running with node_name={}?",
+        name.trim_start_matches('/').split('.').next().unwrap_or(name),
+    );
 }
 
 fn main() {
@@ -55,19 +75,18 @@ fn main() {
 
     let shm_file = open_shm(
         &format!("/{node}"),
-        size_of::<Table<32>>(),
+        size_of::<Table<SHM_ACTUATORS>>(),
     );
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let ass: &mut Table<32> = unsafe {
-        &mut *(table_map.as_ptr() as *mut Table<32>)
+    let ass: &mut Table<SHM_ACTUATORS> = unsafe {
+        &mut *(table_map.as_ptr() as *mut Table<SHM_ACTUATORS>)
     };
 
     let mut robot = get_robot();
     let mut board = init();
 
-    let last_command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
-    let last_state_seq = ass.states.state_seq.load(core::sync::atomic::Ordering::SeqCst);
+    let mut last_command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
@@ -79,6 +98,7 @@ fn main() {
         let command_seq = ass.commands.command_seq.load(core::sync::atomic::Ordering::SeqCst);
         if (command_seq % 2) == 0 && command_seq != last_command_seq {
             robot.sync_write(&ass.commands);
+            last_command_seq = command_seq;
         }
 
         robot_tick(tick_count, &mut robot, &mut board);
@@ -86,7 +106,7 @@ fn main() {
         ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         robot.sync_read(&mut ass.states);
         ass.states.state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-        
+
         let now = std::time::Instant::now();
         if now < next_tick {
             std::thread::sleep(next_tick - now);
