@@ -1,22 +1,19 @@
 use std::fs::File;
 use std::time::Duration;
-use core::option::{Option};
 
 use memmap2::MmapMut;
 
-use lucy_embedded_firmware_core::data::{Table};
+use lucy_embedded_firmware_core::data::Table;
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
 mod resources;
-use resources::Resources;
 
 mod board;
 use board::init;
 
 mod usb_port;
-use usb_port::UsbPort;
 mod config;
 use config::{get_robot, robot_tick};
 
@@ -37,7 +34,6 @@ fn node_name() -> String {
 fn open_shm(name: &str, expected_len: usize) -> File {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
     let deadline = std::time::Instant::now() + SHM_OPEN_TIMEOUT;
-    let mut last_err = std::io::Error::from_raw_os_error(0);
 
     loop {
         let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
@@ -55,18 +51,16 @@ fn open_shm(name: &str, expected_len: usize) -> File {
             }
             return file;
         }
-        last_err = std::io::Error::last_os_error();
+        let err = std::io::Error::last_os_error();
         if std::time::Instant::now() >= deadline {
-            break;
+            panic!(
+                "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {err}. \
+                 Is the ROS 2 stack running with node_name={}?",
+                name.trim_start_matches('/').split('.').next().unwrap_or(name),
+            );
         }
         std::thread::sleep(SHM_OPEN_RETRY);
     }
-
-    panic!(
-        "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {last_err}. \
-         Is the ROS 2 stack running with node_name={}?",
-        name.trim_start_matches('/').split('.').next().unwrap_or(name),
-    );
 }
 
 fn main() {
