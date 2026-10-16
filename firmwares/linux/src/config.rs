@@ -1,6 +1,6 @@
-use lucy_embedded_firmware_core::joint::{*};
+use lucy_embedded_firmware_core::actuator::ActuatorGroup;
+use lucy_embedded_firmware_core::joint::*;
 use lucy_embedded_firmware_core::robot::Robot;
-use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 
 use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusConfig, FeetechBusDriver};
 
@@ -43,7 +43,7 @@ pub fn robot_tick(
     resources: &mut Resources,
 ) {
     let mut driver: FeetechBusDriver<UsbPort, 6> = FeetechBusDriver::<UsbPort, 6>::new(&FEETECH_0);
-    driver.update(
+    let _ = driver.update(
         tick,
         &mut resources.usb0,
         &mut robot.joints_command[0..6],
