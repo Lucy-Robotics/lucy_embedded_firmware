@@ -119,7 +119,8 @@ fn main() {
         })
         .expect("Failed to initialize USB Port");
 
-    let period = Duration::from_millis(50);
+    // 40 Hz: the Mega round trip is ~20 ms; 20 Hz made big servo moves visibly stepped.
+    let period = Duration::from_millis(25);
     let mut next_tick = std::time::Instant::now();
 
     loop {
