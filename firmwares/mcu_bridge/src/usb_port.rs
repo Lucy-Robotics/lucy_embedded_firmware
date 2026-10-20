@@ -37,26 +37,15 @@ impl UsbPortConfig {
                 let port = serialport::new(&port_info.port_name, self.baud_rate)
                     .timeout(Duration::from_millis(50))
                     .open()?;
-                Ok(UsbPort {
-                    config: self.clone(),
-                    port
-                })
+                Ok(UsbPort { port })
             }
-            None => {
-                Err(io::Error::new(io::ErrorKind::NotFound, "No matching USB"))
-            }
+            None => Err(io::Error::new(io::ErrorKind::NotFound, "No matching USB")),
         }
-
     }
 }
 
 pub struct UsbPort {
-    pub config: UsbPortConfig,
     pub port: Box<dyn serialport::SerialPort>,
-}
-
-impl UsbPort {
-
 }
 
 impl SerialChannel for UsbPort {
@@ -68,7 +57,7 @@ impl SerialChannel for UsbPort {
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        let n = self.port.read_exact(buffer)?;
+        self.port.read_exact(buffer)?;
         Ok(buffer.len())
     }
 

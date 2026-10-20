@@ -111,7 +111,6 @@ fn main() {
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
-    let mut tick_count: u64 = 0;
 
     loop {
         next_tick += period;
@@ -146,6 +145,5 @@ fn main() {
             eprintln!("Warning: tick took longer than expected {:?}", now - next_tick);
             next_tick = now;
         }
-        tick_count += 1;
     }
 }

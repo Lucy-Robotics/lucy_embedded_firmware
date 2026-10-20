@@ -10,8 +10,6 @@ use core::marker::PhantomData;
 
 // === Request builder ===
 
-const INST_READ: u8 = 0x02;
-const INST_WRITE: u8 = 0x03;
 const SYNC_READ: u8 = 0x82;
 const SYNC_WRITE: u8 = 0x83;
 

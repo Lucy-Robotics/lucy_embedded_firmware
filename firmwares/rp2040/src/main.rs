@@ -133,11 +133,18 @@ fn main() -> ! {
 
     let mut serial = usbd_serial::SerialPort::new_with_store(&usb_bus, [0u8; 512], [0u8; 512]);
     let mut reset = PicoToolReset::new(&usb_bus);
+    // Serial comes from DEVICE_SERIAL_NUMBER (env or config.yaml `serial_id` via
+    // build.rs). Omit when unset - never bake a hardcoded board string.
+    let mut descriptors = StringDescriptors::default()
+        .manufacturer("Pimoroni")
+        .product("Servo2040 Serial");
+    if let Some(serial_number) = option_env!("DEVICE_SERIAL_NUMBER") {
+        if !serial_number.is_empty() {
+            descriptors = descriptors.serial_number(serial_number);
+        }
+    }
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x2e8a, 0x0003))
-        .strings(&[StringDescriptors::default()
-            .manufacturer("Pimoroni")
-            .product("Servo2040 Serial")
-            .serial_number(env!("DEVICE_SERIAL_NUMBER"))])
+        .strings(&[descriptors])
         .unwrap()
         .device_class(usbd_serial::USB_CLASS_CDC)
         .composite_with_iads()
