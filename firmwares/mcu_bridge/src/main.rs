@@ -106,8 +106,18 @@ fn main() {
         &mut *(table_map.as_ptr() as *mut Table<MAX_ACTUATORS>)
     };
 
-    let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000);
-    let mut port = usb_config.open().expect("Failed to initialize USB Port");
+    // RP2040 first, else Arduino Mega 2560.
+    let mut port = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
+        .open()
+        .or_else(|_| {
+            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open()?;
+            // Opening resets the Mega; bytes sent while its bootloader runs keep it from
+            // ever starting the firmware, so wait it out before the first frame.
+            std::thread::sleep(Duration::from_secs(2));
+            port.clear()?;
+            Ok::<_, std::io::Error>(port)
+        })
+        .expect("Failed to initialize USB Port");
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
@@ -128,7 +138,7 @@ fn main() {
                     Err(e) => {
                         let backlog = port.port.bytes_to_read();
                         eprintln!(
-                            "Failed to read states frame from rp2040: {e} (rx backlog: {backlog:?}), dropping"
+                            "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
                         );
                     }
                 }
