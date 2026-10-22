@@ -13,7 +13,9 @@ use std::os::fd::FromRawFd;
 mod usb_port;
 use usb_port::{UsbPort, UsbPortConfig};
 
-const STATE_BYTES: usize = size_of::<StateBlock<10>>();
+/// Must match HI ``MAX_ACTUATORS`` / ``ActuatorSharedState`` size.
+const SHM_ACTUATORS: usize = 32;
+const STATE_BYTES: usize = size_of::<StateBlock<SHM_ACTUATORS>>();
 
 fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
@@ -98,12 +100,12 @@ fn main() {
 
     let shm_file = open_shm(
         &format!("/{node}"),
-        size_of::<Table<10>>(),
+        size_of::<Table<SHM_ACTUATORS>>(),
     );
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let ass: &mut Table<10> = unsafe {
-        &mut *(table_map.as_ptr() as *mut Table<10>)
+    let ass: &mut Table<SHM_ACTUATORS> = unsafe {
+        &mut *(table_map.as_ptr() as *mut Table<SHM_ACTUATORS>)
     };
 
     let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000);
