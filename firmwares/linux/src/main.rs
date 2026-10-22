@@ -18,7 +18,7 @@ mod config;
 use config::{get_robot, robot_tick};
 
 /// Must match HI ``MAX_ACTUATORS`` / ``ActuatorSharedState`` size.
-const SHM_ACTUATORS: usize = 10;
+const SHM_ACTUATORS: usize = 32;
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);

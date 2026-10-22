@@ -28,8 +28,10 @@ mod config;
 use config::get_robot;
 use config::robot_tick;
 
-const STATE_BYTES: usize = size_of::<StateBlock<10>>();
-const COMMAND_BYTES: usize = size_of::<CommandBlock<10>>();
+/// Must match HI ``MAX_ACTUATORS`` and the host bridge table size.
+const SHM_ACTUATORS: usize = 32;
+const STATE_BYTES: usize = size_of::<StateBlock<SHM_ACTUATORS>>();
+const COMMAND_BYTES: usize = size_of::<CommandBlock<SHM_ACTUATORS>>();
 
 fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
@@ -67,7 +69,7 @@ impl FrameWriter {
     fn push<B: usb_device::bus::UsbBus>(
         &mut self,
         serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
-        states: &StateBlock<10>,
+        states: &StateBlock<SHM_ACTUATORS>,
     ) {
         if self.sent >= FRAME_LEN {
             encode_frame(struct_as_bytes(states), &mut self.buf);
@@ -82,7 +84,7 @@ impl FrameWriter {
 fn read_commands<B: usb_device::bus::UsbBus>(
     serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
     decoder: &mut FrameDecoder<COMMAND_BYTES>,
-    commands: &mut CommandBlock<10>,
+    commands: &mut CommandBlock<SHM_ACTUATORS>,
 ) {
     let mut buf = [0u8; 64];
     loop {
@@ -111,17 +113,17 @@ fn main() -> ! {
     let mut resources = init();
     let mut robot = get_robot();
 
-    let mut commands = CommandBlock::<10> {
+    let mut commands = CommandBlock::<SHM_ACTUATORS> {
         command_seq: AtomicU64::new(0),
-        hw_commands: [0.0; 10],
-        hw_velocities: [0.0; 10],
-        hw_accelerations: [0.0; 10],
-        hw_torque_enabled: [0.0; 10],
+        hw_commands: [0.0; SHM_ACTUATORS],
+        hw_velocities: [0.0; SHM_ACTUATORS],
+        hw_accelerations: [0.0; SHM_ACTUATORS],
+        hw_torque_enabled: [0.0; SHM_ACTUATORS],
     };
 
-    let mut states = StateBlock::<10> {
+    let mut states = StateBlock::<SHM_ACTUATORS> {
         state_seq: AtomicU64::new(0),
-        hw_positions: [0.0; 10],
+        hw_positions: [0.0; SHM_ACTUATORS],
     };
 
     let mut decoder = FrameDecoder::<COMMAND_BYTES>::new();
