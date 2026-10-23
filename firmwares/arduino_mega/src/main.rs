@@ -20,7 +20,10 @@ const STATE_BYTES: usize = size_of::<StateBlock<MAX_ACTUATORS>>();
 const COMMAND_BYTES: usize = size_of::<CommandBlock<MAX_ACTUATORS>>();
 
 // AVR aligns u64/f64 to 1; frames must still match the host's 64-aligned layout byte for byte.
-const _: () = assert!(COMMAND_BYTES == 576 && STATE_BYTES == 192);
+const _: () = assert!(
+    COMMAND_BYTES == (8 + 4 * 8 * MAX_ACTUATORS).next_multiple_of(64)
+        && STATE_BYTES == (8 + 8 * MAX_ACTUATORS).next_multiple_of(64)
+);
 
 fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
