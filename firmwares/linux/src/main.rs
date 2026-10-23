@@ -6,7 +6,9 @@ use memmap2::MmapMut;
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use libc;
 use std::ffi::CString;
+use std::io::Write;
 use std::os::fd::FromRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod resources;
 
@@ -15,10 +17,16 @@ use board::init;
 
 mod usb_port;
 mod config;
-use config::{get_robot, robot_tick};
+use config::{get_robot, robot_release, robot_tick};
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
+
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn request_stop(_: libc::c_int) {
+    STOP.store(true, Ordering::SeqCst);
+}
 
 fn node_name() -> String {
     std::env::args()
@@ -73,13 +81,20 @@ fn main() {
     let mut robot = get_robot();
     let mut board = init();
 
+    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
+        let prev = unsafe { libc::signal(sig, request_stop as *const () as libc::sighandler_t) };
+        if prev == libc::SIG_IGN {
+            unsafe { libc::signal(sig, libc::SIG_IGN) };
+        }
+    }
+
     let mut last_command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
     let mut tick_count: u64 = 0;
 
-    loop {
+    while !STOP.load(Ordering::SeqCst) {
         next_tick += period;
 
         let command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
@@ -94,13 +109,19 @@ fn main() {
         robot.sync_read_shm(&mut ass);
         ass.header().state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
+        if STOP.load(Ordering::SeqCst) {
+            break;
+        }
+
         let now = std::time::Instant::now();
         if now < next_tick {
             std::thread::sleep(next_tick - now);
         } else {
-            eprintln!("Warning: tick took longer than expected {:?}", now - next_tick);
+            let _ = writeln!(std::io::stderr(), "Warning: tick took longer than expected {:?}", now - next_tick);
             next_tick = now;
         }
         tick_count += 1;
     }
+
+    robot_release(&mut board);
 }
