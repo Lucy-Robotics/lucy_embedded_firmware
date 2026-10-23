@@ -8,6 +8,7 @@ use crate::usb_port::UsbPort;
 use crate::resources::Resources;
 
 use core::f64::consts::{PI, TAU};
+use std::io::Write;
 
 pub const JOINTS_CONFIG: [CommandConfig; 6] = [
     CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
@@ -49,4 +50,12 @@ pub fn robot_tick(
         &mut robot.joints_command[0..6],
         &mut robot.joints_state[0..6],
     );
+}
+
+/// Torque off on every servo so the arm goes limp instead of holding when the host stops.
+pub fn robot_release(resources: &mut Resources) {
+    let mut driver: FeetechBusDriver<UsbPort, 6> = FeetechBusDriver::<UsbPort, 6>::new(&FEETECH_0);
+    let _ = driver.set_torque(&mut resources.usb0, &[Command::default(); 6]);
+    // Make sure the frame is on the wire before the process exits and the port closes.
+    let _ = resources.usb0.port.flush();
 }
