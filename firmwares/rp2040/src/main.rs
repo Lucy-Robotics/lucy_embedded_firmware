@@ -3,7 +3,7 @@
 
 use portable_atomic::AtomicU64;
 
-use lucy_embedded_firmware_core::data::{CommandBlock, StateBlock};
+use lucy_embedded_firmware_core::data::{CommandBlock, StateBlock, MAX_ACTUATORS};
 
 use rp2040_hal::fugit::MicrosDurationU64;
 use rp2040_hal::fugit::ExtU32;
@@ -28,10 +28,8 @@ mod config;
 use config::get_robot;
 use config::robot_tick;
 
-/// Must match HI ``MAX_ACTUATORS`` and the host bridge table size.
-const SHM_ACTUATORS: usize = 32;
-const STATE_BYTES: usize = size_of::<StateBlock<SHM_ACTUATORS>>();
-const COMMAND_BYTES: usize = size_of::<CommandBlock<SHM_ACTUATORS>>();
+const STATE_BYTES: usize = size_of::<StateBlock<MAX_ACTUATORS>>();
+const COMMAND_BYTES: usize = size_of::<CommandBlock<MAX_ACTUATORS>>();
 
 fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
@@ -69,7 +67,7 @@ impl FrameWriter {
     fn push<B: usb_device::bus::UsbBus>(
         &mut self,
         serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
-        states: &StateBlock<SHM_ACTUATORS>,
+        states: &StateBlock<MAX_ACTUATORS>,
     ) {
         if self.sent >= FRAME_LEN {
             encode_frame(struct_as_bytes(states), &mut self.buf);
@@ -84,7 +82,7 @@ impl FrameWriter {
 fn read_commands<B: usb_device::bus::UsbBus>(
     serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
     decoder: &mut FrameDecoder<COMMAND_BYTES>,
-    commands: &mut CommandBlock<SHM_ACTUATORS>,
+    commands: &mut CommandBlock<MAX_ACTUATORS>,
 ) {
     let mut buf = [0u8; 64];
     loop {
@@ -113,17 +111,17 @@ fn main() -> ! {
     let mut resources = init();
     let mut robot = get_robot();
 
-    let mut commands = CommandBlock::<SHM_ACTUATORS> {
+    let mut commands = CommandBlock::<MAX_ACTUATORS> {
         command_seq: AtomicU64::new(0),
-        hw_commands: [0.0; SHM_ACTUATORS],
-        hw_velocities: [0.0; SHM_ACTUATORS],
-        hw_accelerations: [0.0; SHM_ACTUATORS],
-        hw_torque_enabled: [0.0; SHM_ACTUATORS],
+        hw_commands: [0.0; MAX_ACTUATORS],
+        hw_velocities: [0.0; MAX_ACTUATORS],
+        hw_accelerations: [0.0; MAX_ACTUATORS],
+        hw_torque_enabled: [0.0; MAX_ACTUATORS],
     };
 
-    let mut states = StateBlock::<SHM_ACTUATORS> {
+    let mut states = StateBlock::<MAX_ACTUATORS> {
         state_seq: AtomicU64::new(0),
-        hw_positions: [0.0; SHM_ACTUATORS],
+        hw_positions: [0.0; MAX_ACTUATORS],
     };
 
     let mut decoder = FrameDecoder::<COMMAND_BYTES>::new();

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use memmap2::MmapMut;
 
-use lucy_embedded_firmware_core::data::{Table, StateBlock};
+use lucy_embedded_firmware_core::data::{Table, StateBlock, MAX_ACTUATORS};
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 use lucy_embedded_firmware_communication::{encode_frame, framed_len, read_frame};
 use libc;
@@ -13,9 +13,7 @@ use std::os::fd::FromRawFd;
 mod usb_port;
 use usb_port::{UsbPort, UsbPortConfig};
 
-/// Must match HI ``MAX_ACTUATORS`` / ``ActuatorSharedState`` size.
-const SHM_ACTUATORS: usize = 32;
-const STATE_BYTES: usize = size_of::<StateBlock<SHM_ACTUATORS>>();
+const STATE_BYTES: usize = size_of::<StateBlock<MAX_ACTUATORS>>();
 
 fn struct_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
@@ -100,12 +98,12 @@ fn main() {
 
     let shm_file = open_shm(
         &format!("/{node}"),
-        size_of::<Table<SHM_ACTUATORS>>(),
+        size_of::<Table<MAX_ACTUATORS>>(),
     );
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let ass: &mut Table<SHM_ACTUATORS> = unsafe {
-        &mut *(table_map.as_ptr() as *mut Table<SHM_ACTUATORS>)
+    let ass: &mut Table<MAX_ACTUATORS> = unsafe {
+        &mut *(table_map.as_ptr() as *mut Table<MAX_ACTUATORS>)
     };
 
     let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000);

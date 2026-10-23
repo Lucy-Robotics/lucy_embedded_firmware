@@ -1,5 +1,8 @@
 use portable_atomic::AtomicU64;
 
+/// Joint slots in the host SHM table and the host<->MCU frames; must match HI `MAX_ACTUATORS`.
+pub const MAX_ACTUATORS: usize = 32;
+
 #[repr(C, align(64))]
 pub struct CommandBlock<const N: usize> {
     pub command_seq: AtomicU64,

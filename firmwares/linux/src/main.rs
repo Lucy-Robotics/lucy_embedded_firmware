@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use memmap2::MmapMut;
 
-use lucy_embedded_firmware_core::data::Table;
+use lucy_embedded_firmware_core::data::{Table, MAX_ACTUATORS};
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
@@ -17,8 +17,7 @@ mod usb_port;
 mod config;
 use config::{get_robot, robot_tick};
 
-/// Must match HI ``MAX_ACTUATORS`` / ``ActuatorSharedState`` size.
-const SHM_ACTUATORS: usize = 32;
+const SHM_ACTUATORS: usize = MAX_ACTUATORS;
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);

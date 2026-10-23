@@ -37,7 +37,7 @@ flowchart TB
 
 Feetech on Servo2040 is **UART half-duplex** (GPIO0 TX, GPIO1 RX, GPIO2 DIR @ 1 Mbaud) — not “Bus” as a protocol name beyond the bank type.
 
-**ABI:** ros [`ActuatorSharedState`](https://github.com/Lucy-Robotics/lucy_ros_packages/pull/63) uses flat `double[MAX_ACTUATORS]` (`MAX_ACTUATORS=32`). Firmware `JointTable<N>` nests `CommandBlock` / `StateBlock` / `HeartbeatBlock`. Field sets match for the same `N`; agree `N` before overlaying host and MCU consumers.
+**ABI:** ros [`ActuatorSharedState`](https://github.com/Lucy-Robotics/lucy_ros_packages/pull/63) uses flat `double[MAX_ACTUATORS]` (`MAX_ACTUATORS=32`, `lucy_embedded_firmware_core::data::MAX_ACTUATORS`). Firmware `JointTable<N>` nests `CommandBlock` / `StateBlock` / `HeartbeatBlock`. Field sets match for the same `N`; agree `N` before overlaying host and MCU consumers.
 
 ## Crate layout
 
