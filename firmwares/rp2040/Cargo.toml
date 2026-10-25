@@ -37,3 +37,4 @@ usbd-serial = "0.2.2"
 ws2812-pio = "0.9.0"
 
 [build-dependencies]
+builder = { path = "../../crates/builder/" }
