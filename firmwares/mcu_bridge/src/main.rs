@@ -145,10 +145,12 @@ fn main() {
             panic!("No RP2040 / Arduino Mega USB port (serial {}): {e}", serial.as_deref().unwrap_or("any"))
         });
 
-    // 40 Hz: the Mega round trip is ~20 ms; 20 Hz made big servo moves visibly stepped.
+    // 40 Hz target: the Mega round trip is ~31 ms, so in practice ~32 Hz; 20 Hz made big servo
+    // moves visibly stepped.
     let period = Duration::from_millis(25);
     let mut next_tick = std::time::Instant::now();
 
+    let mut problems = ProblemLog::new();
     loop {
         next_tick += period;
 
@@ -164,14 +166,20 @@ fn main() {
                     }
                     Err(e) => {
                         let backlog = port.port.bytes_to_read();
-                        eprintln!(
+                        let kind = match e {
+                            ReadFrameError::CrcMismatch => Problem::Crc,
+                            ReadFrameError::Io(_) => Problem::ReadIo,
+                        };
+                        problems.record(kind, || format!(
                             "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
-                        );
+                        ));
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to write commands over serial port: {e}, dropping tick");
+                problems.record(Problem::Write, || {
+                    format!("Failed to write commands over serial port: {e}, dropping tick")
+                });
             }
         }
 
@@ -179,8 +187,71 @@ fn main() {
         if now < next_tick {
             std::thread::sleep(next_tick - now);
         } else {
-            eprintln!("Warning: tick took longer than expected {:?}", now - next_tick);
+            // A Mega round trip (~31 ms) outlasts the 25 ms period, so the bridge simply runs as
+            // fast as the link allows; only an overrun of a whole period is a stall worth reporting.
+            let late = now - next_tick;
+            if late > period {
+                problems.record(Problem::Late, || format!("Warning: tick took longer than expected {late:?}"));
+            }
             next_tick = now;
         }
+        problems.flush();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Problem {
+    Crc,
+    ReadIo,
+    Write,
+    Late,
+}
+
+const PROBLEM_NAMES: [&str; 4] = [
+    "states frames with a bad CRC",
+    "states frames lost (io)",
+    "command writes failed",
+    "stalled ticks (over a whole period late)",
+];
+const SUMMARY_PERIOD: Duration = Duration::from_secs(10);
+
+/// Per-tick problems would print up to 40 lines a second: the first of each kind prints in full,
+/// later ones are counted and summed up every SUMMARY_PERIOD.
+struct ProblemLog {
+    counts: [u32; 4],
+    reported: [bool; 4],
+    since: std::time::Instant,
+}
+
+impl ProblemLog {
+    fn new() -> Self {
+        Self { counts: [0; 4], reported: [false; 4], since: std::time::Instant::now() }
+    }
+
+    fn record(&mut self, problem: Problem, detail: impl FnOnce() -> String) {
+        let i = problem as usize;
+        if self.reported[i] {
+            self.counts[i] += 1;
+        } else {
+            self.reported[i] = true;
+            eprintln!("{} (repeats are summed up every {}s)", detail(), SUMMARY_PERIOD.as_secs());
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.since.elapsed() < SUMMARY_PERIOD {
+            return;
+        }
+        let parts: Vec<String> = PROBLEM_NAMES
+            .iter()
+            .zip(self.counts)
+            .filter(|(_, n)| *n > 0)
+            .map(|(name, n)| format!("{n} {name}"))
+            .collect();
+        if !parts.is_empty() {
+            eprintln!("Last {}s: {}", SUMMARY_PERIOD.as_secs(), parts.join(", "));
+        }
+        self.counts = [0; 4];
+        self.since = std::time::Instant::now();
     }
 }
