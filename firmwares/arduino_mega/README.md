@@ -1,33 +1,32 @@
 # Arduino Mega 2560 firmware
 
-One Mega per board of the robot hardware YAML (`board_class: i2c_pwm_only`). Servos hang off
-PCA9685s chained on the Mega's I2C bus (D20 SDA / D21 SCL).
+One Mega per `i2c_pwm_only` board of the robot hardware YAML. Servos hang off the PCA9685s
+chained on the Mega's I2C bus (D20 SDA / D21 SCL), listed in the board's `pca_addresses`.
 
-| Cargo feature (`compile_definition`) | Board (inmoov_i2_urdf) | PCA9685 addresses | Servos |
-|---|---|---|---|
-| `torso_head` | `mega_torso_head` | `0x41` | 12 |
-| `arms` | `mega_arms` | `0x40`, `0x41` | 18 |
-
-Outputs are numbered across chips: `physical_pin` 1-16 in the YAML is the first PCA's
-channels 0-15, 17-32 the second's. The tables in `src/config/` mirror the YAML by hand
-(slot = `virtual_pin`), and the build fails if a limit leaves the 0..180 deg servo travel or
-two slots share an output.
+The board tables (PCA addresses, per-slot limits, which slot drives which output) are not in
+this crate: `lucy_config_generator` writes them from the YAML as `config_<board>.rs`, and the
+build includes the file named by `LUCY_MEGA_BOARD_CONFIG`. Outputs are numbered across chips:
+`physical_pin` 1-16 is the first address's channels 0-15, 17-32 the second's. Only enabled
+actuators are driven, and the build fails if a limit leaves the 0..180 deg servo travel or two
+driven slots share an output.
 
 ## Build and flash
 
-From the workspace root, with `avr-gcc` and `avrdude` on the host:
+From the LCP: activate a configuration with the board selected; the config pipeline generates,
+builds and flashes it. From the workspace root:
 
 ```sh
-pixi run firmware-flash-mega mega_arms   # builds with the board's feature, flashes its serial_id
+pixi run firmware-flash-mega mega_right   # --robot <pkg>, --port <dev>, --build-only
 ```
 
-Or by hand, from this directory: `cargo build --release --features arms`.
+Both need `avr-gcc` and `avrdude` on the host and find the Mega by its USB serial (`serial_id`).
 
 ## Run
 
-One bridge per board, matched by the Mega's USB serial number (`serial_id`):
+`lucy.launch.py real:=true` starts one bridge per Mega board that has a `serial_id`:
 
 ```sh
-lucy-embedded-firmware-mcu-bridge torso_head <serial_id>
-lucy-embedded-firmware-mcu-bridge arms <serial_id>
+lucy-embedded-firmware-mcu-bridge <node_name> <serial_id>   # e.g. right 1453230323235110C0D0
 ```
+
+While a board is flashed, `/tmp/.lucy_mcu_flashing_<serial_id>` exists and its bridge waits.

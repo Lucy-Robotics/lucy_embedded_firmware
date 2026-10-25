@@ -78,6 +78,18 @@ fn usb_serial() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
+/// owns the port: opening it then would corrupt the upload.
+fn wait_while_flashing(serial: &str) {
+    let lock = std::path::PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{serial}"));
+    if lock.exists() {
+        println!("Board {serial} is being flashed, waiting for {}", lock.display());
+        while lock.exists() {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+}
+
 fn open_shm(name: &str, min_len: usize) -> File {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
     let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
@@ -116,6 +128,9 @@ fn main() {
 
     // RP2040 first, else Arduino Mega 2560.
     let serial = usb_serial();
+    if let Some(s) = &serial {
+        wait_while_flashing(s);
+    }
     let mut port = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
         .open(serial.as_deref())
         .or_else(|_| {
