@@ -70,6 +70,14 @@ fn node_name() -> String {
         .unwrap_or_else(|| "lucy".to_string())
 }
 
+/// USB serial number of the board to drive (its `serial_id`); unset = first board found.
+fn usb_serial() -> Option<String> {
+    std::env::args()
+        .nth(2)
+        .or_else(|| std::env::var("LUCY_USB_SERIAL").ok())
+        .filter(|s| !s.is_empty())
+}
+
 fn open_shm(name: &str, min_len: usize) -> File {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
     let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
@@ -107,17 +115,20 @@ fn main() {
     };
 
     // RP2040 first, else Arduino Mega 2560.
+    let serial = usb_serial();
     let mut port = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
-        .open()
+        .open(serial.as_deref())
         .or_else(|_| {
-            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open()?;
+            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial.as_deref())?;
             // Opening resets the Mega; bytes sent while its bootloader runs keep it from
             // ever starting the firmware, so wait it out before the first frame.
             std::thread::sleep(Duration::from_secs(2));
             port.clear()?;
             Ok::<_, std::io::Error>(port)
         })
-        .expect("Failed to initialize USB Port");
+        .unwrap_or_else(|e| {
+            panic!("No RP2040 / Arduino Mega USB port (serial {}): {e}", serial.as_deref().unwrap_or("any"))
+        });
 
     // 40 Hz: the Mega round trip is ~20 ms; 20 Hz made big servo moves visibly stepped.
     let period = Duration::from_millis(25);
