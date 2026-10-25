@@ -426,6 +426,7 @@ name = "lucy-embedded-firmware-arduino-mega"
 version = "0.1.0"
 dependencies = [
  "arduino-hal",
+ "avr-device",
  "embedded-hal 1.0.0",
  "lucy-embedded-firmware-communication",
  "lucy-embedded-firmware-core",
