@@ -21,12 +21,16 @@ impl UsbPortConfig {
         }
     }
 
-    pub fn open(&self) -> Result<UsbPort, io::Error> {
+    /// Opens the first port with this VID/PID, or with `serial` the one whose USB serial
+    /// number matches: one bridge per board when several are plugged in.
+    pub fn open(&self, serial: Option<&str>) -> Result<UsbPort, io::Error> {
         let ports = serialport::available_ports().unwrap();
 
         let matching_port = ports.into_iter().find(|p| {
-            if let SerialPortType::UsbPort(UsbPortInfo { vid, pid, .. }) = p.port_type {
-                vid == self.target_vid && pid == self.target_pid
+            if let SerialPortType::UsbPort(UsbPortInfo { vid, pid, serial_number, .. }) = &p.port_type {
+                *vid == self.target_vid
+                    && *pid == self.target_pid
+                    && serial.is_none_or(|s| serial_number.as_deref() == Some(s))
             } else {
                 false
             }
