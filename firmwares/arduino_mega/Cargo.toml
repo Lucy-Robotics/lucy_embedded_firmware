@@ -8,12 +8,6 @@ name = "lucy-embedded-firmware-arduino-mega"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-# One firmware per board: build with exactly one, the board's `compile_definition`
-# in the robot hardware YAML (see src/config/).
-torso_head = []
-arms = []
-
 [dependencies]
 lucy-embedded-firmware-core = { path = "../../crates/core" }
 lucy-embedded-firmware-communication = { path = "../../crates/communication" }
