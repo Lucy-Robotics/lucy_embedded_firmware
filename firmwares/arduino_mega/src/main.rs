@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(abi_avr_interrupt)]
 
 use portable_atomic::AtomicU64;
 
@@ -10,9 +11,12 @@ use arduino_hal::prelude::*;
 use panic_halt as _;
 
 mod channel;
+// macro_use: board.rs uses the generated mega_servo_pins! macro.
+#[macro_use]
+mod config;
 mod board;
 use board::init;
-mod config;
+mod servo_pins;
 use config::get_robot;
 use config::robot_tick;
 

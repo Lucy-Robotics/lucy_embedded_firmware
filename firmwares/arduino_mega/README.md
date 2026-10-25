@@ -1,7 +1,10 @@
 # Arduino Mega 2560 firmware
 
 One Mega per `i2c_pwm_only` board of the robot hardware YAML. Servos hang off the PCA9685s
-chained on the Mega's I2C bus (D20 SDA / D21 SCL), listed in the board's `pca_addresses`.
+chained on the Mega's I2C bus (D20 SDA / D21 SCL), listed in the board's `pca_addresses`, or sit
+straight on Mega pins (the Nervo ribbons), listed in `mega_pins` and pulsed in turn by Timer5
+within a 20 ms frame (8 pins at most; not D0/D1 or D20/D21). `physical_pin` numbers the PCA
+outputs first, then the `mega_pins` in order.
 
 The board tables (PCA addresses, per-slot limits, which slot drives which output) are not in
 this crate: `lucy_config_generator` writes them from the YAML as `config_<board>.rs`, and the

@@ -37,5 +37,8 @@ pub fn init() -> Resources {
     // Upgrade to reporting init/write errors to the host once states carry diagnostics.
     pca.init().ok();
 
+    // Nervo ribbon servos on Mega pins, pulsed by Timer5.
+    crate::servo_pins::init(dp.TC5, mega_servo_pins!(pins));
+
     Resources { serial, pca }
 }

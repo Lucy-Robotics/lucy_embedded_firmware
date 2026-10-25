@@ -6,11 +6,12 @@ use lucy_embedded_firmware_core::data::MAX_ACTUATORS;
 use lucy_embedded_firmware_pwm::pwm_servo::{PwmServoConfig, PwmServoDriver};
 
 use crate::board::Resources;
+use crate::servo_pins::PinServo;
 
 use core::f64::consts::PI;
 
 // Board tables generated from the robot hardware YAML by lucy_config_generator
-// (config_<board>.rs: PCA_ADDRESSES, JOINTS_CONFIG, DRIVEN). The config pipeline and
+// (config_<board>.rs: PCA_ADDRESSES, MEGA_PINS, JOINTS_CONFIG, DRIVEN). The config pipeline and
 // `pixi run firmware-flash-mega <board>` set LUCY_MEGA_BOARD_CONFIG to that file.
 include!(env!(
     "LUCY_MEGA_BOARD_CONFIG",
@@ -18,6 +19,8 @@ include!(env!(
 ));
 
 pub const JOINTS: usize = JOINTS_CONFIG.len();
+/// Outputs below this are PCA9685 channels, the rest MEGA_PINS.
+const PCA_OUTPUTS: usize = 16 * PCA_ADDRESSES.len();
 
 // Arduino Servo library defaults: 0..180 deg = 544..2400 us.
 pub const PWM_0: PwmServoConfig = PwmServoConfig {
@@ -27,9 +30,10 @@ pub const PWM_0: PwmServoConfig = PwmServoConfig {
 };
 
 // Board table checks: limits fit the travel PWM_0 maps, each driven slot exists, and each
-// output exists and drives one slot.
+// output exists and drives one slot; pin pulses fit one 20 ms frame.
 const _: () = {
     assert!(JOINTS <= MAX_ACTUATORS);
+    assert!(MEGA_PINS.len() <= 8);
     let mut i = 0;
     while i < JOINTS {
         let c = JOINTS_CONFIG[i];
@@ -39,7 +43,7 @@ const _: () = {
     let mut i = 0;
     while i < DRIVEN.len() {
         assert!(DRIVEN[i].0 < JOINTS);
-        assert!((DRIVEN[i].1 as usize) < 16 * PCA_ADDRESSES.len());
+        assert!((DRIVEN[i].1 as usize) < PCA_OUTPUTS + MEGA_PINS.len());
         let mut j = i + 1;
         while j < DRIVEN.len() {
             assert!(DRIVEN[i].1 != DRIVEN[j].1);
@@ -63,12 +67,14 @@ pub fn robot_tick(
     resources: &mut Resources) {
 
     for &(i, output) in DRIVEN.iter() {
-        let mut channel = resources.pca.output(output);
-        PwmServoDriver::new(&PWM_0).update(
-            tick,
-            &mut channel,
-            &mut robot.joints_command[i..i + 1],
-            &mut robot.joints_state[i..i + 1],
-        ).ok();
+        let command = &mut robot.joints_command[i..i + 1];
+        let state = &mut robot.joints_state[i..i + 1];
+        if (output as usize) < PCA_OUTPUTS {
+            let mut channel = resources.pca.output(output);
+            PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
+        } else {
+            let mut channel = PinServo { index: output as usize - PCA_OUTPUTS };
+            PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
+        }
     }
 }
