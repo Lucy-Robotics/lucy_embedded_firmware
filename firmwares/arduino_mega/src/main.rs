@@ -45,6 +45,7 @@ fn struct_as_bytes_mut<T>(value: &mut T) -> &mut [u8] {
 }
 
 const FRAME_LEN: usize = framed_len(STATE_BYTES);
+const TX_CHUNK_GAP_US: u32 = 500;
 
 // Statics, not locals: AVR does not realign its stack, and LLVM computes field addresses
 // of these align(64) blocks from that assumed alignment, which garbles the frames.
@@ -105,8 +106,14 @@ fn main() -> ! {
         robot.sync_read(states);
 
         encode_frame(struct_as_bytes(states), &mut frame);
-        for &b in &frame {
+        for (i, &b) in frame.iter().enumerate() {
             resources.serial.write_byte(b);
+            // The 16U2 USB-serial chip relays through a 128-byte ring: sent in one 1 Mbaud
+            // burst, the frame's last bytes (its CRC) overwrote bytes still queued 128 earlier.
+            // A pause per 64 bytes lets it drain; 500 us was the shortest gap clean on the bench.
+            if i % 64 == 63 {
+                arduino_hal::delay_us(TX_CHUNK_GAP_US);
+            }
         }
     }
 }
