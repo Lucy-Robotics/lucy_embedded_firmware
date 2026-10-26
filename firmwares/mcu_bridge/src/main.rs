@@ -112,6 +112,10 @@ fn pca_changes(addresses: &[u8], slot: f64, last: &mut Option<u8>) -> Vec<String
     lines
 }
 
+/// No states frame for this long means the board is on USB but not answering (frozen, or
+/// still in its bootloader); it covers a normal reboot after connecting.
+const SILENT_AFTER: Duration = Duration::from_secs(3);
+
 const RETRY: Duration = Duration::from_secs(1);
 
 /// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
@@ -213,6 +217,9 @@ fn main() {
     let mut failed_writes = 0u32;
     let pcas = parse_pca_addresses(&std::env::args().nth(3).unwrap_or_default());
     let mut pcas_missing = None;
+    let label = serial.clone().unwrap_or_default();
+    let mut last_answer = std::time::Instant::now();
+    let mut silent = false;
     loop {
         // Close the port at once when a flasher takes the lock, so avrdude has the board.
         if lock.as_deref().is_some_and(|l| l.exists()) {
@@ -220,6 +227,7 @@ fn main() {
             drop(port);
             port = connect(serial.as_deref(), lock.as_deref());
             next_tick = std::time::Instant::now();
+            last_answer = next_tick;
         }
         next_tick += period;
 
@@ -233,6 +241,11 @@ fn main() {
                 match read_framed_payload(&mut port, STATE_BYTES) {
                     Ok(payload) => {
                         struct_as_bytes_mut(&mut ass.states).copy_from_slice(&payload);
+                        last_answer = std::time::Instant::now();
+                        if silent {
+                            silent = false;
+                            println!("Board {label} answering");
+                        }
                         let slot = ass.states.hw_positions[MAX_ACTUATORS - 1];
                         for line in pca_changes(&pcas, slot, &mut pcas_missing) {
                             println!("{line}");
@@ -262,11 +275,16 @@ fn main() {
                     port = connect(serial.as_deref(), lock.as_deref());
                     failed_writes = 0;
                     next_tick = std::time::Instant::now();
+                    last_answer = next_tick;
                 }
             }
         }
 
         let now = std::time::Instant::now();
+        if !silent && now - last_answer > SILENT_AFTER {
+            silent = true;
+            println!("Board {label} not answering");
+        }
         if now < next_tick {
             std::thread::sleep(next_tick - now);
         } else {
