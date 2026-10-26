@@ -104,6 +104,7 @@ fn main() -> ! {
             &mut resources,
         );
         robot.sync_read(states);
+        states.hw_positions[config::PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f64;
 
         encode_frame(struct_as_bytes(states), &mut frame);
         for (i, &b) in frame.iter().enumerate() {

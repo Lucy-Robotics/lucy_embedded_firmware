@@ -33,8 +33,7 @@ pub fn init() -> Resources {
         400_000,
     );
     let mut pca = Pca9685Bank { i2c, addresses: &crate::config::PCA_ADDRESSES };
-    // shortcut: a missing PCA only shows as servos that never move.
-    // Upgrade to reporting init/write errors to the host once states carry diagnostics.
+    // A PCA missing now is reported (and set up once it answers) by the per-tick check.
     pca.init().ok();
 
     // Nervo ribbon servos on Mega pins, pulsed by Timer5.
