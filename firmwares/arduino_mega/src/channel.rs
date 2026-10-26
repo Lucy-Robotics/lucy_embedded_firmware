@@ -42,6 +42,25 @@ impl<I: I2c> Pca9685Bank<I> {
         self.write(address, &[ALL_LED_ON_L, 0, 0, 0, 0x10])
     }
 
+    /// Bit i set = `addresses[i]` did not answer. A chip found asleep lost power since its
+    /// setup (MODE1 resets to sleep), so it is set up again and the next tick's pulses land.
+    pub fn check(&mut self) -> u8 {
+        let mut missing = 0;
+        for (i, &address) in self.addresses.iter().enumerate() {
+            let mut mode1 = [0u8];
+            match self.i2c.write_read(address, &[MODE1], &mut mode1) {
+                Err(_) => missing |= 1 << i,
+                Ok(()) if mode1[0] & 0x10 != 0 => {
+                    if self.init_chip(address).is_err() {
+                        missing |= 1 << i;
+                    }
+                }
+                Ok(()) => {}
+            }
+        }
+        missing
+    }
+
     fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), PwmError> {
         self.i2c.write(address, bytes).map_err(|_| PwmError::I2c)
     }
