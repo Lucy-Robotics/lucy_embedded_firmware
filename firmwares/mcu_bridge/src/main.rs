@@ -78,6 +78,40 @@ fn usb_serial() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// PCA9685 addresses of a Mega board (`0x41,0x40`), in its `pca_addresses` order.
+fn parse_pca_addresses(arg: &str) -> Vec<u8> {
+    arg.split(',')
+        .filter_map(|a| {
+            let a = a.trim();
+            a.strip_prefix("0x").map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
+        })
+        .collect()
+}
+
+/// The Mega firmware reports its PCA9685s in the last state slot as `0x100 | missing bits`
+/// (bit i = `addresses[i]`). Returns a line for every chip the first time, then per change.
+fn pca_changes(addresses: &[u8], slot: f64, last: &mut Option<u8>) -> Vec<String> {
+    let value = slot as u16;
+    if addresses.is_empty() || value & 0x100 == 0 {
+        return Vec::new();
+    }
+    let missing = value as u8;
+    let lines = addresses
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| last.is_none_or(|m| (m ^ missing) & (1 << i) != 0))
+        .map(|(i, address)| {
+            if missing & (1 << i) != 0 {
+                format!("PCA9685 {address:#04x} not answering: its servos can't move")
+            } else {
+                format!("PCA9685 {address:#04x} answering")
+            }
+        })
+        .collect();
+    *last = Some(missing);
+    lines
+}
+
 const RETRY: Duration = Duration::from_secs(1);
 
 /// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
@@ -177,6 +211,8 @@ fn main() {
 
     let mut problems = ProblemLog::new();
     let mut failed_writes = 0u32;
+    let pcas = parse_pca_addresses(&std::env::args().nth(3).unwrap_or_default());
+    let mut pcas_missing = None;
     loop {
         // Close the port at once when a flasher takes the lock, so avrdude has the board.
         if lock.as_deref().is_some_and(|l| l.exists()) {
@@ -197,6 +233,10 @@ fn main() {
                 match read_framed_payload(&mut port, STATE_BYTES) {
                     Ok(payload) => {
                         struct_as_bytes_mut(&mut ass.states).copy_from_slice(&payload);
+                        let slot = ass.states.hw_positions[MAX_ACTUATORS - 1];
+                        for line in pca_changes(&pcas, slot, &mut pcas_missing) {
+                            println!("{line}");
+                        }
                     }
                     Err(e) => {
                         let backlog = port.port.bytes_to_read();
@@ -296,5 +336,30 @@ impl ProblemLog {
         }
         self.counts = [0; 4];
         self.since = std::time::Instant::now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pca_addresses_parse_hex_and_decimal() {
+        assert_eq!(parse_pca_addresses("0x41,64"), vec![0x41, 0x40]);
+        assert!(parse_pca_addresses("").is_empty());
+    }
+
+    #[test]
+    fn pca_changes_print_once_then_on_change() {
+        let pcas = [0x41, 0x40];
+        let mut last = None;
+        // Firmware without the PCA check leaves the slot at 0: nothing to say.
+        assert!(pca_changes(&pcas, 0.0, &mut last).is_empty());
+        assert_eq!(
+            pca_changes(&pcas, (0x100 | 0b10) as f64, &mut last),
+            ["PCA9685 0x41 answering", "PCA9685 0x40 not answering: its servos can't move"]
+        );
+        assert!(pca_changes(&pcas, (0x100 | 0b10) as f64, &mut last).is_empty());
+        assert_eq!(pca_changes(&pcas, 0x100 as f64, &mut last), ["PCA9685 0x40 answering"]);
     }
 }

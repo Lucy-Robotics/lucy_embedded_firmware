@@ -19,6 +19,9 @@ include!(env!(
 ));
 
 pub const JOINTS: usize = JOINTS_CONFIG.len();
+/// Last state slot, never a joint: carries `0x100 | missing-PCA bits` (bit i = PCA_ADDRESSES[i])
+/// to mcu_bridge; the 0x100 tells it apart from firmware that leaves the slot at 0.
+pub const PCA_STATUS_SLOT: usize = MAX_ACTUATORS - 1;
 /// Outputs below this are PCA9685 channels, the rest MEGA_PINS.
 const PCA_OUTPUTS: usize = 16 * PCA_ADDRESSES.len();
 
@@ -32,7 +35,7 @@ pub const PWM_0: PwmServoConfig = PwmServoConfig {
 // Board table checks: limits fit the travel PWM_0 maps, each driven slot exists, and each
 // output exists and drives one slot; pin pulses fit one 20 ms frame.
 const _: () = {
-    assert!(JOINTS <= MAX_ACTUATORS);
+    assert!(JOINTS < MAX_ACTUATORS && PCA_ADDRESSES.len() <= 8);
     assert!(MEGA_PINS.len() <= 8);
     let mut i = 0;
     while i < JOINTS {
