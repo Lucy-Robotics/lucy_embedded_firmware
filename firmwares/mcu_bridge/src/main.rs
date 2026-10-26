@@ -78,37 +78,80 @@ fn usb_serial() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+const RETRY: Duration = Duration::from_secs(1);
+
 /// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
-/// owns the port: opening it then would corrupt the upload.
-fn wait_while_flashing(serial: &str) {
-    let lock = std::path::PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{serial}"));
-    if lock.exists() {
-        println!("Board {serial} is being flashed, waiting for {}", lock.display());
-        while lock.exists() {
-            std::thread::sleep(Duration::from_millis(500));
-        }
-    }
+/// owns the port: the bridge must not touch the board then.
+fn flash_lock(serial: Option<&str>) -> Option<std::path::PathBuf> {
+    serial.map(|s| std::path::PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
 }
 
-fn open_shm(name: &str, min_len: usize) -> File {
+fn try_open_shm(name: &str, min_len: usize) -> Result<File, String> {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
     let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
     if fd == -1 {
-        panic!(
-            "shm_open(\"{name}\") failed: {}. Is the ROS 2 stack running with node_name={}?",
-            std::io::Error::last_os_error(),
-            name.trim_start_matches('/').split('.').next().unwrap_or(name),
-        );
+        return Err(format!("shm_open: {}", std::io::Error::last_os_error()));
     }
     let file = unsafe { File::from_raw_fd(fd) };
-    let len = file
-        .metadata()
-        .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
-        .len() as usize;
+    let len = file.metadata().map_err(|e| format!("stat: {e}"))?.len() as usize;
     if len != min_len {
-        panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
+        return Err(format!("{len} bytes, expected {min_len}"));
     }
-    file
+    Ok(file)
+}
+
+/// The hardware interface creates the table once the control stack is up: wait for it.
+fn attach_shm(name: &str, min_len: usize) -> File {
+    let mut waiting = false;
+    loop {
+        match try_open_shm(name, min_len) {
+            Ok(file) => return file,
+            Err(e) if !waiting => {
+                println!("Waiting for the control stack's shared memory {name} ({e})");
+                waiting = true;
+            }
+            Err(_) => {}
+        }
+        std::thread::sleep(RETRY);
+    }
+}
+
+/// RP2040 first, else Arduino Mega 2560.
+fn open_board(serial: Option<&str>) -> std::io::Result<UsbPort> {
+    UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
+        .open(serial)
+        .or_else(|_| {
+            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial)?;
+            // Opening resets the Mega; bytes sent while its bootloader runs keep it from
+            // ever starting the firmware, so wait it out before the first frame.
+            std::thread::sleep(Duration::from_secs(2));
+            port.clear()?;
+            Ok(port)
+        })
+}
+
+/// Open the board, waiting (one message per state) while it is unplugged or being flashed.
+fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> UsbPort {
+    let label = serial.unwrap_or("(first found)");
+    let mut said: Option<String> = None;
+    loop {
+        let state = if lock.is_some_and(|l| l.exists()) {
+            "is being flashed".to_string()
+        } else {
+            match open_board(serial) {
+                Ok(port) => {
+                    println!("Board {label} connected");
+                    return port;
+                }
+                Err(e) => format!("not found ({e})"),
+            }
+        };
+        if said.as_deref() != Some(state.as_str()) {
+            println!("Board {label} {state}, waiting");
+            said = Some(state);
+        }
+        std::thread::sleep(RETRY);
+    }
 }
 
 
@@ -116,34 +159,16 @@ fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let shm_file = open_shm(
-        &format!("/{node}"),
-        size_of::<Table<MAX_ACTUATORS>>(),
-    );
+    let shm_file = attach_shm(&format!("/{node}"), size_of::<Table<MAX_ACTUATORS>>());
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
     let ass: &mut Table<MAX_ACTUATORS> = unsafe {
         &mut *(table_map.as_ptr() as *mut Table<MAX_ACTUATORS>)
     };
 
-    // RP2040 first, else Arduino Mega 2560.
     let serial = usb_serial();
-    if let Some(s) = &serial {
-        wait_while_flashing(s);
-    }
-    let mut port = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
-        .open(serial.as_deref())
-        .or_else(|_| {
-            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial.as_deref())?;
-            // Opening resets the Mega; bytes sent while its bootloader runs keep it from
-            // ever starting the firmware, so wait it out before the first frame.
-            std::thread::sleep(Duration::from_secs(2));
-            port.clear()?;
-            Ok::<_, std::io::Error>(port)
-        })
-        .unwrap_or_else(|e| {
-            panic!("No RP2040 / Arduino Mega USB port (serial {}): {e}", serial.as_deref().unwrap_or("any"))
-        });
+    let lock = flash_lock(serial.as_deref());
+    let mut port = connect(serial.as_deref(), lock.as_deref());
 
     // 40 Hz target: the Mega round trip is ~31 ms, so in practice ~32 Hz; 20 Hz made big servo
     // moves visibly stepped.
@@ -151,7 +176,15 @@ fn main() {
     let mut next_tick = std::time::Instant::now();
 
     let mut problems = ProblemLog::new();
+    let mut failed_writes = 0u32;
     loop {
+        // Close the port at once when a flasher takes the lock, so avrdude has the board.
+        if lock.as_deref().is_some_and(|l| l.exists()) {
+            println!("Board {} is being flashed: releasing the port", serial.as_deref().unwrap_or(""));
+            drop(port);
+            port = connect(serial.as_deref(), lock.as_deref());
+            next_tick = std::time::Instant::now();
+        }
         next_tick += period;
 
         let payload = struct_as_bytes(&ass.commands);
@@ -160,6 +193,7 @@ fn main() {
 
         match port.write(&frame) {
             Ok(()) => {
+                failed_writes = 0;
                 match read_framed_payload(&mut port, STATE_BYTES) {
                     Ok(payload) => {
                         struct_as_bytes_mut(&mut ass.states).copy_from_slice(&payload);
@@ -180,6 +214,15 @@ fn main() {
                 problems.record(Problem::Write, || {
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
+                failed_writes += 1;
+                // Unplugged (or reset into the bootloader): reopen instead of failing forever.
+                if failed_writes >= 3 {
+                    println!("Board {} stopped answering: reconnecting", serial.as_deref().unwrap_or(""));
+                    drop(port);
+                    port = connect(serial.as_deref(), lock.as_deref());
+                    failed_writes = 0;
+                    next_tick = std::time::Instant::now();
+                }
             }
         }
 
