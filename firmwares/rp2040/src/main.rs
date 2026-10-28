@@ -1,9 +1,8 @@
 #![no_std]
 #![no_main]
 
-use portable_atomic::AtomicU64;
-
-use lucy_embedded_firmware_core::data::{CommandBlock, StateBlock};
+use lucy_embedded_firmware_core::joint::TorqueStatus;
+use lucy_embedded_firmware_core::robot::Robot;
 
 use rp2040_hal::fugit::MicrosDurationU64;
 use rp2040_hal::fugit::ExtU32;
@@ -15,7 +14,9 @@ use picotool_reset::PicoToolReset;
 
 use smart_leds::RGB8;
 
-use lucy_embedded_firmware_communication::{encode_frame, framed_len, FrameDecoder};
+use lucy_embedded_firmware_communication::{
+    encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
+};
 
 use cortex_m_rt::entry;
 use panic_halt as _;
@@ -25,36 +26,16 @@ mod channel;
 mod board;
 use board::init;
 mod config;
-use config::get_robot;
+use config::{get_robot, JOINTS};
 use config::robot_tick;
 
-/// Must match HI ``MAX_ACTUATORS`` and the host bridge table size.
-const SHM_ACTUATORS: usize = 32;
-const STATE_BYTES: usize = size_of::<StateBlock<SHM_ACTUATORS>>();
-const COMMAND_BYTES: usize = size_of::<CommandBlock<SHM_ACTUATORS>>();
+type Serial<'a, B> = usbd_serial::SerialPort<'a, B, [u8; 512], [u8; 512]>;
 
-fn struct_as_bytes<T>(value: &T) -> &[u8] {
-    unsafe {
-        core::slice::from_raw_parts(
-            value as *const T as *const u8,
-            size_of::<T>(),
-        )
-    }
-}
-
-fn struct_as_bytes_mut<T>(value: &mut T) -> &mut [u8] {
-    unsafe {
-        core::slice::from_raw_parts_mut(
-            value as *mut T as *mut u8,
-            size_of::<T>(),
-        )
-    }
-}
-
-const FRAME_LEN: usize = framed_len(STATE_BYTES);
+const FRAME_LEN: usize = frame_len(JOINTS);
 
 struct FrameWriter {
     buf: [u8; FRAME_LEN],
+    len: usize,
     sent: usize,
 }
 
@@ -62,43 +43,76 @@ impl FrameWriter {
     const fn new() -> Self {
         Self {
             buf: [0u8; FRAME_LEN],
-            sent: FRAME_LEN,
+            len: 0,
+            sent: 0,
         }
     }
 
-    fn push<B: usb_device::bus::UsbBus>(
-        &mut self,
-        serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
-        states: &StateBlock<SHM_ACTUATORS>,
-    ) {
-        if self.sent >= FRAME_LEN {
-            encode_frame(struct_as_bytes(states), &mut self.buf);
+    fn is_idle(&self) -> bool {
+        self.sent >= self.len
+    }
+
+    fn start(&mut self, frame: &Frame<JOINTS>) {
+        if let Ok(len) = encode(frame, &mut self.buf) {
+            self.len = len;
             self.sent = 0;
         }
-        if let Ok(n) = serial.write(&self.buf[self.sent..]) {
+    }
+
+    fn flush<B: usb_device::bus::UsbBus>(&mut self, serial: &mut Serial<'_, B>) {
+        if self.is_idle() {
+            return;
+        }
+        if let Ok(n) = serial.write(&self.buf[self.sent..self.len]) {
             self.sent += n;
         }
     }
 }
 
 fn read_commands<B: usb_device::bus::UsbBus>(
-    serial: &mut usbd_serial::SerialPort<'_, B, [u8; 512], [u8; 512]>,
-    decoder: &mut FrameDecoder<COMMAND_BYTES>,
-    commands: &mut CommandBlock<SHM_ACTUATORS>,
-) {
+    serial: &mut Serial<'_, B>,
+    decoder: &mut FrameDecoder<'_, JOINTS>,
+    commands: &mut JointCommands<JOINTS>,
+) -> Option<u32> {
+    let mut last_seq = None;
     let mut buf = [0u8; 64];
     loop {
         match serial.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(count) => {
                 for &byte in &buf[..count] {
-                    if let Some(payload) = decoder.push_byte(byte) {
-                        struct_as_bytes_mut(commands).copy_from_slice(payload);
+                    if let Some(Ok(Frame { seq, body: Body::Command(c), .. })) = decoder.push_byte(byte) {
+                        *commands = c;
+                        last_seq = Some(seq);
                     }
                 }
             }
         }
     }
+    last_seq
+}
+
+fn apply_commands<const N: usize>(robot: &mut Robot<N>, commands: &JointCommands<N>) {
+    for (i, joint) in robot.joints_command.iter_mut().enumerate() {
+        joint.position = commands.positions[i];
+        joint.velocity = commands.velocities[i];
+        joint.acceleration = commands.accelerations[i];
+        joint.torque_enabled = if commands.torque_enabled[i] {
+            TorqueStatus::Enabled
+        } else {
+            TorqueStatus::Disabled
+        };
+    }
+}
+
+fn disable_torque<const N: usize>(robot: &mut Robot<N>) {
+    for joint in robot.joints_command.iter_mut() {
+        joint.torque_enabled = TorqueStatus::Disabled;
+    }
+}
+
+fn collect_states<const N: usize>(robot: &Robot<N>) -> JointStates<N> {
+    JointStates { positions: robot.joints_state.map(|joint| joint.position) }
 }
 
 #[unsafe(link_section = ".boot2")]
@@ -107,27 +121,22 @@ fn read_commands<B: usb_device::bus::UsbBus>(
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
 const TICK_PERIOD: MicrosDurationU64 = MicrosDurationU64::micros(1000);
+const COMMAND_TIMEOUT: MicrosDurationU64 = MicrosDurationU64::millis(200);
 
 #[entry]
 fn main() -> ! {
     let mut resources = init();
     let mut robot = get_robot();
 
-    let mut commands = CommandBlock::<SHM_ACTUATORS> {
-        command_seq: AtomicU64::new(0),
-        hw_commands: [0.0; SHM_ACTUATORS],
-        hw_velocities: [0.0; SHM_ACTUATORS],
-        hw_accelerations: [0.0; SHM_ACTUATORS],
-        hw_torque_enabled: [0.0; SHM_ACTUATORS],
-    };
+    let mut commands = JointCommands::<JOINTS>::default();
 
-    let mut states = StateBlock::<SHM_ACTUATORS> {
-        state_seq: AtomicU64::new(0),
-        hw_positions: [0.0; SHM_ACTUATORS],
-    };
-
-    let mut decoder = FrameDecoder::<COMMAND_BYTES>::new();
+    let mut rx_buf = [0u8; FRAME_LEN];
+    let mut decoder = FrameDecoder::<JOINTS>::new(&mut rx_buf);
     let mut frame_writer = FrameWriter::new();
+    let mut pending_reply: Option<u32> = None;
+    let mut last_command_tick: Option<u64> = None;
+    let mut tick_count: u64 = 0;
+    let mut last_error_tick: u64 = 0;
 
     let mut ws2812 = resources.ws.take().unwrap();
 
@@ -163,23 +172,39 @@ fn main() -> ! {
         let tick_start = resources.timer.get_counter().ticks();
         usb_dev.poll(&mut [&mut serial, &mut reset]);
 
-        read_commands(&mut serial, &mut decoder, &mut commands);
+        if let Some(seq) = read_commands(&mut serial, &mut decoder, &mut commands) {
+            pending_reply = Some(seq);
+            last_command_tick = Some(tick_start);
+            apply_commands(&mut robot, &commands);
+        }
 
-        robot.sync_write(&commands);
-        robot.sync_read(&mut states);
+        let timed_out = match last_command_tick {
+            Some(t) => tick_start - t > COMMAND_TIMEOUT.ticks(),
+            None => true,
+        };
+        if timed_out {
+            disable_torque(&mut robot);
+        }
 
-        frame_writer.push(&mut serial, &states);
+        if !robot_tick(tick_count, &mut robot, &mut resources) {
+            last_error_tick = tick_start;
+        }
+        tick_count = tick_count.wrapping_add(1);
 
-        robot_tick(
-            states.state_seq.load(portable_atomic::Ordering::Relaxed),
-            &mut robot,
-            &mut resources,
-        );
+        if frame_writer.is_idle() {
+            if let Some(seq) = pending_reply.take() {
+                frame_writer.start(&Frame::new(seq, Body::State(collect_states(&robot))));
+            }
+        }
+        frame_writer.flush(&mut serial);
 
         let elapsed_led_ticks = resources.timer.get_counter().ticks() - led_tick;
         if elapsed_led_ticks > 500_000 {
             led_tick = resources.timer.get_counter().ticks();
-            ws2812.set_color(0, RGB8::new(0, 50 * (led_on as u8), 0));
+            let level = 50 * (led_on as u8);
+            let bus_error = last_error_tick != 0 && led_tick - last_error_tick < 1_000_000;
+            let color = if bus_error { RGB8::new(level, 0, 0) } else { RGB8::new(0, level, 0) };
+            ws2812.set_color(0, color);
             led_on = !led_on;
         }
 
