@@ -20,12 +20,47 @@ use config::{get_robot, robot_tick};
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn node_name() -> String {
-    std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("LUCY_NODE_NAME").ok())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "lucy".to_string())
+fn die(message: impl std::fmt::Display) -> ! {
+    let message = message.to_string();
+    eprintln!("{message}");
+    // The launcher TUI reads these when the Real Hardware row is CRASHED.
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_status", "1\n");
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_error", &message);
+    std::process::exit(1);
+}
+
+struct HostArgs {
+    node: String,
+    device: String,
+    vid: u16,
+    pid: u16,
+}
+
+fn parse_u16_id(text: &str) -> Option<u16> {
+    let text = text.trim();
+    if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        u16::from_str_radix(hex, 16).ok()
+    } else {
+        text.parse().ok()
+    }
+}
+
+fn host_args() -> HostArgs {
+    let incomplete = "This robot configuration does not name the device to open. Fix it, then relaunch Lucy.";
+    let mut args = std::env::args().skip(1);
+    let Some(node) = args.next().filter(|s| !s.is_empty()) else {
+        die(incomplete);
+    };
+    let Some(device) = args.next().filter(|s| !s.is_empty()) else {
+        die(incomplete);
+    };
+    let Some(vid) = args.next().and_then(|s| parse_u16_id(&s)) else {
+        die(incomplete);
+    };
+    let Some(pid) = args.next().and_then(|s| parse_u16_id(&s)) else {
+        die(incomplete);
+    };
+    HostArgs { node, device, vid, pid }
 }
 
 fn open_shm(name: &str, min_len: usize) -> File {
@@ -36,29 +71,25 @@ fn open_shm(name: &str, min_len: usize) -> File {
         let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
         if fd != -1 {
             let file = unsafe { File::from_raw_fd(fd) };
-            let len = file
-                .metadata()
-                .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
-                .len() as usize;
+            let len = match file.metadata() {
+                Ok(meta) => meta.len() as usize,
+                Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
+            };
             if len < min_len {
-                panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
+                die("This robot configuration does not match Lucy. Relaunch Lucy.");
             }
             return file;
         }
-        let err = std::io::Error::last_os_error();
         if std::time::Instant::now() >= deadline {
-            panic!(
-                "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {err}. \
-                 Is the ROS 2 stack running with node_name={}?",
-                name.trim_start_matches('/').split('.').next().unwrap_or(name),
-            );
+            die("Lucy did not finish starting. Relaunch Lucy.");
         }
         std::thread::sleep(SHM_OPEN_RETRY);
     }
 }
 
 fn main() {
-    let node = node_name();
+    let host = host_args();
+    let node = host.node;
     println!("Attaching to Lucy shared memory for node_name={node}");
 
     let shm_file = open_shm(
@@ -66,12 +97,18 @@ fn main() {
         size_of::<ShmHeader>(),
     );
 
-    let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
+    let table_map = match unsafe { MmapMut::map_mut(&shm_file) } {
+        Ok(map) => map,
+        Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
+    };
     let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
-        .unwrap_or_else(|e| panic!("invalid shm layout: {e}"));
+        .unwrap_or_else(|_| die("This robot configuration does not match Lucy. Relaunch Lucy."));
 
     let mut robot = get_robot();
-    let mut board = init();
+    let mut board = match init(host.vid, host.pid) {
+        Ok(board) => board,
+        Err(err) => die(usb_port::user_message(err.kind(), &host.device)),
+    };
 
     let mut last_command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
 
