@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+use memmap2::MmapMut;
+
+use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use lucy_embedded_firmware_communication::{
     Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
@@ -12,42 +15,66 @@ use lucy_embedded_firmware_host::usb_port::{ClearBuffer, UsbPort, UsbPortConfig}
 use lucy_embedded_firmware_serial::SerialChannel;
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
-const RP2040_JOINTS: usize = 6;
+const JOINTS: usize = 32;
+const FRAME_LEN: usize = frame_len(JOINTS);
 
-const REPLY_TIMEOUT: Duration = Duration::from_millis(60);
-const LINK_TIMEOUT: Duration = Duration::from_millis(200);
+const REPLY_TIMEOUT: Duration = Duration::from_millis(40);
+/// Wait for LucySystemHardware to create SHM (bringup may start the bridge first).
+const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
+const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Copy, PartialEq)]
-enum Board {
-    Rp2040,
-    Mega,
+fn die(message: impl std::fmt::Display) -> ! {
+    let message = message.to_string();
+    eprintln!("{message}");
+    // The launcher TUI reads these when the Real Hardware row is CRASHED.
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_status", "1\n");
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_error", &message);
+    std::process::exit(1);
 }
 
-impl Board {
-    fn port_config(self, serial: Option<&str>) -> UsbPortConfig {
-        let (vid, pid) = match self {
-            Board::Rp2040 => (0x2e8a, 0x0003),
-            Board::Mega => (0x2341, 0x0042),
-        };
-        UsbPortConfig::new(vid, pid, 1_000_000)
-            .with_clear_buffer(ClearBuffer::All)
-            .with_serial_number(serial.map(str::to_string))
-    }
+struct BridgeArgs {
+    node: String,
+    serial: String,
+    device: String,
 }
 
-enum ReplyError {
-    Timeout,
-    Io(std::io::Error),
-    Corrupt(FrameError),
+fn bridge_args() -> BridgeArgs {
+    let incomplete = "This robot configuration does not name the device to open. Fix it, then relaunch Lucy.";
+    let mut args = std::env::args().skip(1);
+    let Some(node) = args.next().filter(|value| !value.is_empty()) else {
+        die(incomplete);
+    };
+    let Some(serial) = args.next().filter(|value| !value.is_empty()) else {
+        die(incomplete);
+    };
+    let device = args
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| serial.clone());
+    BridgeArgs { node, serial, device }
 }
 
-impl std::fmt::Display for ReplyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReplyError::Timeout => write!(f, "no reply within {REPLY_TIMEOUT:?}"),
-            ReplyError::Io(e) => write!(f, "io error ({:?}): {e}", e.kind()),
-            ReplyError::Corrupt(e) => write!(f, "corrupt frame ({e})"),
+fn open_shm(name: &str, min_len: usize) -> File {
+    let c_name = CString::new(name).expect("shm name contains a NUL byte");
+    let deadline = Instant::now() + SHM_OPEN_TIMEOUT;
+
+    loop {
+        let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
+        if fd != -1 {
+            let file = unsafe { File::from_raw_fd(fd) };
+            let len = match file.metadata() {
+                Ok(meta) => meta.len() as usize,
+                Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
+            };
+            if len < min_len {
+                die("This robot configuration does not match Lucy. Relaunch Lucy.");
+            }
+            return file;
         }
+        if Instant::now() >= deadline {
+            die("Lucy did not finish starting. Relaunch Lucy.");
+        }
+        std::thread::sleep(SHM_OPEN_RETRY);
     }
 }
 
@@ -204,50 +231,35 @@ fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)
 }
 
 fn main() {
-    let shm = Shm::attach(&node_name());
+    let bridge = bridge_args();
+    let node = bridge.node;
+    println!("Attaching to Lucy shared memory for node_name={node}");
 
-    install_stop_handler();
+    let shm_file = open_shm(&format!("/{node}"), size_of::<ShmHeader>());
 
-    let serial = usb_serial();
-    let lock = flash_lock(serial.as_deref());
-    let Some((port, board)) = connect(serial.as_deref(), lock.as_deref()) else {
-        return;
+    let table_map = match unsafe { MmapMut::map_mut(&shm_file) } {
+        Ok(map) => map,
+        Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
     };
-
-    // shortcut: assumes virtual_pins are 0..joints-1
-    let width = match board {
-        Board::Rp2040 => RP2040_JOINTS,
-        Board::Mega => shm.max_actuators() + 1,
-    };
-    macro_rules! dispatch {
-        ($($w:literal)*) => {
-            match width {
-                $($w => run::<$w>(shm, port, board, serial, lock),)*
-                w => panic!("no link for {w} slots (shm declares {} joints)", shm.max_actuators()),
-            }
-        };
+    let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
+        .unwrap_or_else(|_| die("Lucy could not attach to the robot. Relaunch Lucy."));
+    let n = JOINTS.min(ass.max_actuators());
+    if ass.max_actuators() != JOINTS {
+        eprintln!(
+            "Warning: shm declares {} joints but the rp2040 link carries {JOINTS}; only the first {n} are forwarded",
+            ass.max_actuators()
+        );
     }
     dispatch!(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33);
 }
 
-fn run<const N: usize>(
-    mut shm: Shm,
-    mut port: UsbPort,
-    board: Board,
-    serial: Option<String>,
-    lock: Option<PathBuf>,
-) {
-    let n = shm.max_actuators();
-    let joints = if board == Board::Mega {
-        N - 1
-    } else {
-        N.min(n)
+    println!("Opening Pico serial {} for node_name={node}", bridge.serial);
+    let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000, bridge.serial);
+    let mut port = match usb_config.open() {
+        Ok(port) => port,
+        Err(err) => die(usb_port::user_fix(err.kind(), &bridge.device)),
     };
-    if joints != n {
-        eprintln!(
-            "Warning: shm declares {n} joints but the link carries {joints}; only the first {joints} are forwarded"
-        );
-    }
+    port.clear().ok();
 
     let mut rx_buf = vec![0u8; frame_len(N)];
     let mut decoder = FrameDecoder::<N>::new(&mut rx_buf);

@@ -1,6 +1,6 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
-pub trait PwmChannel {
-    type Error;
-    fn set_pwm(&mut self, pulse: u16) -> Result<(), Self::Error>;
-}
+pub mod pca9685;
+pub mod pulse;
+pub mod pwm_channel;
+pub mod pwm_servo;
