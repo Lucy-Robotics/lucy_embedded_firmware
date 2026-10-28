@@ -1,7 +1,7 @@
+use crate::pulse::pulse_width_us;
 use crate::pwm_channel::PwmChannel;
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
-use lucy_embedded_firmware_core::utils::map_range;
 use core::f32::consts::PI;
 use core::marker::PhantomData;
 
@@ -19,8 +19,8 @@ impl Default for PwmServoConfig {
     fn default() -> Self {
         PwmServoConfig {
             amplitude: PI as f64,
-            min_pulse: 544,
-            max_pulse: 2400,
+            min_pulse: 500,
+            max_pulse: 2500,
         }
     }
 }
@@ -56,13 +56,12 @@ impl<C: PwmChannel> PwmServoDriver<C> {
             return Ok(());
         }
 
-        let pulse = (map_range(
+        let pulse = pulse_width_us(
             command[0].position,
-            0f64,
             self.config.amplitude,
-            self.config.min_pulse as f64,
-            self.config.max_pulse as f64,
-        ) + 0.5) as u16;
+            self.config.min_pulse,
+            self.config.max_pulse,
+        );
 
         bus.set_pwm(pulse)
             .map_err(|_| PwmServoError::CommunicationError)?;
@@ -71,19 +70,17 @@ impl<C: PwmChannel> PwmServoDriver<C> {
 
 
     pub fn set_torque(&mut self, bus: &mut <Self as ActuatorGroup>::Bus, command: &mut [Command]) -> Result<(), <Self as ActuatorGroup>::Error> {
-        let value = if command[0].torque_enabled == TorqueStatus::Enabled {
-            command[0].position
-        } else {
-            0.0
-        };
-
-        let pulse = (map_range(
-            value,
-            0f64,
+        if command[0].torque_enabled != TorqueStatus::Enabled {
+            bus.set_pwm(0)
+                .map_err(|_| PwmServoError::CommunicationError)?;
+            return Ok(());
+        }
+        let pulse = pulse_width_us(
+            command[0].position,
             self.config.amplitude,
-            self.config.min_pulse as f64,
-            self.config.max_pulse as f64,
-        ) + 0.5) as u16;
+            self.config.min_pulse,
+            self.config.max_pulse,
+        );
 
         bus.set_pwm(pulse)
             .map_err(|_| PwmServoError::CommunicationError)?;

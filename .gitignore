@@ -4,6 +4,7 @@ debug
 target
 
 # Secrets
+.env
 .envrc
 .direnv
 
@@ -27,3 +28,9 @@ Cargo.lock
 #.idea/
 
 *.uf2
+
+# Local board YAML (Pico serial ids)
+/config/
+
+# Generator output; the crate compiles config.rs
+firmwares/**/generated_config.rs

@@ -15,8 +15,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=config.yaml");
     println!("cargo:rerun-if-env-changed=DEVICE_SERIAL_NUMBER");
+    println!("cargo:rerun-if-env-changed=LUCY_FIRMWARE_CONFIG");
 
-    let config_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml");
+    let config_path = env::var("LUCY_FIRMWARE_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml"));
+    println!("cargo:rerun-if-changed={}", config_path.display());
 
     // USB serial: env override, else config.yaml `serial_id`. Never hardcode a
     // board string — that bricks multi-Pico desks. Missing → omit (main.rs).
@@ -24,14 +28,40 @@ fn main() {
         println!("cargo:rustc-env=DEVICE_SERIAL_NUMBER={serial}");
     }
 
-    if config_path.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if contents.contains("actuators:") && contents.contains("virtual_pin:") {
-                // TODO: re-enable once crates/builder compiles and is a build-dependency.
-                // build_config(config_path.to_string_lossy().into_owned());
-            }
-        }
+    if !config_path.exists() {
+        panic!(
+            "firmware config missing at {} (set LUCY_FIRMWARE_CONFIG or provide firmwares/rp2040/config.yaml). \
+             Refusing to build an empty no-op UF2.",
+            config_path.display()
+        );
     }
+    let yaml = std::fs::read_to_string(&config_path).unwrap_or_else(|err| {
+        panic!("failed to read {}: {err}", config_path.display())
+    });
+    if yaml.trim().is_empty() {
+        panic!(
+            "{} is empty; expected a projected firmware spec with pwm:/i2c_pwm:",
+            config_path.display()
+        );
+    }
+    let has_pwm_key = yaml.lines().any(|line| line.trim_start().starts_with("pwm:"));
+    let has_i2c_pwm_key = yaml.lines().any(|line| line.trim_start().starts_with("i2c_pwm:"));
+    let has_actuators_key = yaml.lines().any(|line| line.trim_start().starts_with("actuators:"));
+    if has_actuators_key && !has_pwm_key {
+        panic!(
+            "{} looks like a hardware mapping; expected a projected firmware spec with pwm:/i2c_pwm:",
+            config_path.display()
+        );
+    }
+    if !has_pwm_key && !has_i2c_pwm_key {
+        panic!(
+            "{} has neither pwm: nor i2c_pwm:; refusing to build a no-op UF2. \
+             Pass a projected firmware spec (pipeline sets LUCY_FIRMWARE_CONFIG).",
+            config_path.display()
+        );
+    }
+    let table = builder::render_static_table(&yaml);
+    std::fs::write(out.join("header_table.rs"), table).unwrap();
 }
 
 /// Prefer `DEVICE_SERIAL_NUMBER`, else non-empty `serial_id` from the board YAML.
