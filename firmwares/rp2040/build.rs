@@ -27,7 +27,8 @@ fn main() {
     if config_path.exists() {
         if let Ok(contents) = std::fs::read_to_string(&config_path) {
             if contents.contains("actuators:") && contents.contains("virtual_pin:") {
-                build_config(config_path.to_string_lossy().into_owned());
+                // TODO: re-enable once crates/builder compiles and is a build-dependency.
+                // build_config(config_path.to_string_lossy().into_owned());
             }
         }
     }

@@ -92,6 +92,10 @@ where
     }
 
     fn clear(&mut self) -> Result<(), Self::Error> {
+        let mut scratch = [0u8; 32];
+        while self.uart.uart_is_readable() {
+            let _ = self.uart.read_raw(&mut scratch);
+        }
         Ok(())
     }
 }
