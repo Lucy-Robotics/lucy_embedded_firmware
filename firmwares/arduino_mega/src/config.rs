@@ -1,7 +1,6 @@
 use lucy_embedded_firmware_core::joint::{*};
 use lucy_embedded_firmware_core::robot::Robot;
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::data::MAX_ACTUATORS;
 
 use lucy_embedded_firmware_pwm::pwm_servo::{PwmServoConfig, PwmServoDriver};
 
@@ -19,9 +18,10 @@ include!(env!(
 ));
 
 pub const JOINTS: usize = JOINTS_CONFIG.len();
-/// Last state slot, never a joint: carries `0x100 | missing-PCA bits` (bit i = PCA_ADDRESSES[i])
-/// to mcu_bridge; the 0x100 tells it apart from firmware that leaves the slot at 0.
-pub const PCA_STATUS_SLOT: usize = MAX_ACTUATORS - 1;
+/// Extra state slot after the joints, never a joint: carries `0x100 | missing-PCA bits`
+/// (bit i = PCA_ADDRESSES[i]) to mcu_bridge, which links JOINTS + 1 slots to a Mega.
+pub const PCA_STATUS_SLOT: usize = JOINTS;
+pub const LINK: usize = JOINTS + 1;
 /// Outputs below this are PCA9685 channels, the rest MEGA_PINS.
 const PCA_OUTPUTS: usize = 16 * PCA_ADDRESSES.len();
 
@@ -35,7 +35,7 @@ pub const PWM_0: PwmServoConfig = PwmServoConfig {
 // Board table checks: limits fit the travel PWM_0 maps, each driven slot exists, and each
 // output exists and drives one slot; pin pulses fit one 20 ms frame.
 const _: () = {
-    assert!(JOINTS < MAX_ACTUATORS && PCA_ADDRESSES.len() <= 8);
+    assert!(PCA_ADDRESSES.len() <= 8);
     assert!(MEGA_PINS.len() <= 8);
     let mut i = 0;
     while i < JOINTS {
