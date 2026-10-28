@@ -2,10 +2,10 @@
 #![no_main]
 #![feature(abi_avr_interrupt)]
 
-use portable_atomic::AtomicU64;
-
-use lucy_embedded_firmware_core::data::{CommandBlock, StateBlock, MAX_ACTUATORS};
-use lucy_embedded_firmware_communication::{encode_frame, framed_len, FrameDecoder};
+use lucy_embedded_firmware_core::joint::TorqueStatus;
+use lucy_embedded_firmware_communication::{
+    encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
+};
 
 use arduino_hal::prelude::*;
 use panic_halt as _;
@@ -17,97 +17,62 @@ mod config;
 mod board;
 use board::init;
 mod servo_pins;
-use config::get_robot;
-use config::robot_tick;
+use config::{get_robot, robot_tick, JOINTS, LINK, PCA_STATUS_SLOT};
 
-const STATE_BYTES: usize = size_of::<StateBlock<MAX_ACTUATORS>>();
-const COMMAND_BYTES: usize = size_of::<CommandBlock<MAX_ACTUATORS>>();
-
-// AVR aligns u64/f64 to 1; frames must still match the host's 64-aligned layout byte for byte.
-const _: () = assert!(COMMAND_BYTES == 576 && STATE_BYTES == 192);
-
-fn struct_as_bytes<T>(value: &T) -> &[u8] {
-    unsafe {
-        core::slice::from_raw_parts(
-            value as *const T as *const u8,
-            size_of::<T>(),
-        )
-    }
-}
-
-fn struct_as_bytes_mut<T>(value: &mut T) -> &mut [u8] {
-    unsafe {
-        core::slice::from_raw_parts_mut(
-            value as *mut T as *mut u8,
-            size_of::<T>(),
-        )
-    }
-}
-
-const FRAME_LEN: usize = framed_len(STATE_BYTES);
+const FRAME_LEN: usize = frame_len(LINK);
 const TX_CHUNK_GAP_US: u32 = 500;
 
-// Statics, not locals: AVR does not realign its stack, and LLVM computes field addresses
-// of these align(64) blocks from that assumed alignment, which garbles the frames.
-static mut COMMANDS: CommandBlock<MAX_ACTUATORS> = CommandBlock {
-    command_seq: AtomicU64::new(0),
-    hw_commands: [0.0; MAX_ACTUATORS],
-    hw_velocities: [0.0; MAX_ACTUATORS],
-    hw_accelerations: [0.0; MAX_ACTUATORS],
-    hw_torque_enabled: [0.0; MAX_ACTUATORS],
-};
-
-static mut STATES: StateBlock<MAX_ACTUATORS> = StateBlock {
-    state_seq: AtomicU64::new(0),
-    hw_positions: [0.0; MAX_ACTUATORS],
-};
+fn apply_commands(robot: &mut lucy_embedded_firmware_core::robot::Robot<JOINTS>, commands: &JointCommands<LINK>) {
+    for i in 0..JOINTS {
+        let position = robot.clamp_position(i, commands.positions[i]);
+        let joint = &mut robot.joints_command[i];
+        joint.position = position;
+        joint.velocity = commands.velocities[i];
+        joint.acceleration = commands.accelerations[i];
+        joint.torque_enabled = if commands.torque_enabled[i] {
+            TorqueStatus::Enabled
+        } else {
+            TorqueStatus::Disabled
+        };
+    }
+}
 
 #[arduino_hal::entry]
 fn main() -> ! {
     let mut resources = init();
     let mut robot = get_robot();
 
-    // SAFETY: only main touches these, and it never returns.
-    let commands = unsafe { &mut *(&raw mut COMMANDS) };
-    let states = unsafe { &mut *(&raw mut STATES) };
-
-    let mut decoder = FrameDecoder::<COMMAND_BYTES>::new();
-    let mut frame = [0u8; FRAME_LEN];
+    let mut rx = [0u8; FRAME_LEN];
+    let mut decoder = FrameDecoder::<LINK>::new(&mut rx);
+    let mut tx = [0u8; FRAME_LEN];
+    let mut tick: u64 = 0;
 
     // Request/response with mcu_bridge: the USART has a 2-byte FIFO, so only poll bytes
     // while a command frame streams in, and do the slow work once it is complete.
-    // The servo is only driven after the first valid command frame.
-    // shortcut: idle measured in empty polls (~2 us each), not a timer; ~10 ms here.
-    // Upgrade to a hardware timer if the loop body grows.
-    const IDLE_RESYNC_POLLS: u16 = 5_000;
-    let mut idle_polls: u16 = 0;
+    // The servos are only driven after the first valid command frame; a corrupt frame is
+    // dropped at its 0x00 delimiter and the bridge times out and resends.
     loop {
         let Ok(byte) = resources.serial.read() else {
-            // A gap means the host finished (or abandoned) a frame: drop any partial
-            // sync so a stray 0xAA mid-frame can't lock the decoder out for good.
-            idle_polls = idle_polls.saturating_add(1);
-            if idle_polls == IDLE_RESYNC_POLLS {
-                decoder = FrameDecoder::new();
-            }
             continue;
         };
-        idle_polls = 0;
-        let Some(payload) = decoder.push_byte(byte) else {
+        let Some(Ok(Frame { seq, body: Body::Command(commands), .. })) = decoder.push_byte(byte) else {
             continue;
         };
-        struct_as_bytes_mut(commands).copy_from_slice(payload);
 
-        robot.sync_write(commands);
-        robot_tick(
-            states.state_seq.load(portable_atomic::Ordering::Relaxed),
-            &mut robot,
-            &mut resources,
-        );
-        robot.sync_read(states);
-        states.hw_positions[config::PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f64;
+        apply_commands(&mut robot, &commands);
+        robot_tick(tick, &mut robot, &mut resources);
+        tick = tick.wrapping_add(1);
 
-        encode_frame(struct_as_bytes(states), &mut frame);
-        for (i, &b) in frame.iter().enumerate() {
+        // PWM servos report no position: NaN tells the hardware interface to keep echoing its
+        // command instead of publishing a made-up one.
+        let mut states = JointStates::<LINK>::default();
+        states.positions[..JOINTS].fill(f64::NAN);
+        states.positions[PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f64;
+
+        let Ok(len) = encode(&Frame::new(seq, Body::State(states)), &mut tx) else {
+            continue;
+        };
+        for (i, &b) in tx[..len].iter().enumerate() {
             resources.serial.write_byte(b);
             // The 16U2 USB-serial chip relays through a 128-byte ring: sent in one 1 Mbaud
             // burst, the frame's last bytes (its CRC) overwrote bytes still queued 128 earlier.

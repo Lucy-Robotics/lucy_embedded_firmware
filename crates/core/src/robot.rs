@@ -8,7 +8,7 @@ pub struct Robot<const M: usize> {
 }
 
 impl<const M: usize> Robot<M> {
-    fn clamp_position(&self, i: usize, position: f64) -> f64 {
+    pub fn clamp_position(&self, i: usize, position: f64) -> f64 {
         match self.joints_config.get(i) {
             Some(config) => position.clamp(config.limit_min, config.limit_max),
             None => position,
