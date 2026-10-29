@@ -96,6 +96,72 @@ fn compute_checksum(payload: &[u8]) -> u8 {
     !sum
 }
 
+fn read_status<S: SerialChannel>(bus: &mut S, params: &mut [u8]) -> Result<u8, FeetechBusError> {
+    const MAX_SKIPPED_BYTES: usize = 64;
+
+    let mut skipped = 0usize;
+    let mut byte = [0u8; 1];
+    let mut prev = 0u8;
+    loop {
+        if skipped > MAX_SKIPPED_BYTES {
+            return Err(FeetechBusError::CommunicationError);
+        }
+
+        bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+        if !(prev == 0xFF && byte[0] == 0xFF) {
+            prev = byte[0];
+            skipped += 1;
+            continue;
+        }
+
+        let mut id = 0xFFu8;
+        while id == 0xFF && skipped <= MAX_SKIPPED_BYTES {
+            bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+            id = byte[0];
+            skipped += 1;
+        }
+        bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+        let len = byte[0] as usize;
+        prev = 0;
+
+        let mut body = [0u8; 64];
+        if len < 2 || len > body.len() {
+            skipped += 2;
+            continue;
+        }
+        bus.read(&mut body[..len]).map_err(|_| FeetechBusError::CommunicationError)?;
+
+        let sum = [id, len as u8]
+            .iter()
+            .chain(&body[..len - 1])
+            .fold(0u8, |acc, &x| acc.wrapping_add(x));
+        if !sum != body[len - 1] || id == 0xFE || len - 2 != params.len() {
+            skipped += 2 + len;
+            continue;
+        }
+
+        params.copy_from_slice(&body[1..len - 1]);
+        return Ok(id);
+    }
+}
+
+fn read_replies<S: SerialChannel, const N: usize, const P: usize>(
+    bus: &mut S,
+    config: &FeetechBusConfig<N>,
+    mut apply: impl FnMut(usize, &[u8; P]),
+) -> Result<(), FeetechBusError> {
+    let mut seen = [false; N];
+    let mut params = [0u8; P];
+    while seen.iter().any(|s| !s) {
+        let id = read_status(bus, &mut params)?;
+        if let Some(i) = config.servos.iter().position(|cfg| cfg.id == id) {
+            seen[i] = true;
+            apply(i, &params);
+        }
+    }
+    Ok(())
+}
+
 // === Individual servo
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,15 +213,15 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
     type Bus = S;
 
     fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
-        self.set_torque(bus, command)?;
-        self.set_position(bus, command)?;
-        self.read_position(bus, state)?;
-        match tick % 10 {
-            0 => self.read_temperature(bus, state)?,
-            1 => self.read_torque(bus, state)?,
-            _ => {}
+        let torque = self.set_torque(bus, command);
+        let position = self.set_position(bus, command);
+        let feedback = self.read_position(bus, state);
+        let extra = match tick % 10 {
+            0 => self.read_temperature(bus, state),
+            1 => self.read_torque(bus, state),
+            _ => Ok(()),
         };
-        Ok(())
+        torque.and(position).and(feedback).and(extra)
     }
 }
 
@@ -270,7 +336,6 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
     pub fn read_temperature(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_TEMP: u8 = 0x3F;
-        const RESPONSE_LEN: usize = 7;
 
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
@@ -299,25 +364,13 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         bus.write(&frame[..size])
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        for s in state.iter_mut() {
-            let mut rx_frame = [0u8; RESPONSE_LEN];
-            bus.read(&mut rx_frame)
-                .map_err(|_| FeetechBusError::CommunicationError)?;
-
-            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
-            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
-                return Err(FeetechBusError::CommunicationError);
-            }
-
-            s.temperature = rx_frame[5] as f64;
-        }
-
-        Ok(())
+        read_replies(bus, self.config, |i, params: &[u8; 1]| {
+            state[i].temperature = params[0] as f64;
+        })
     }
 
     pub fn read_torque(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_LOAD: u8 = 0x3C;
-        const RESPONSE_LEN: usize = 8;
 
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
@@ -346,28 +399,16 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         bus.write(&frame[..size])
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        for s in state.iter_mut() {
-            let mut rx_frame = [0u8; RESPONSE_LEN];
-            bus.read(&mut rx_frame)
-                .map_err(|_| FeetechBusError::CommunicationError)?;
-
-            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
-            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
-                return Err(FeetechBusError::CommunicationError);
-            }
-
-            let raw = u16::from_le_bytes([rx_frame[5], rx_frame[6]]);
+        read_replies(bus, self.config, |i, params: &[u8; 2]| {
+            let raw = u16::from_le_bytes(*params);
             let magnitude = (raw & 0x3FF) as f64 / 1000.0;
             let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
-            s.torque = sign * magnitude;
-        }
-
-        Ok(())
+            state[i].torque = sign * magnitude;
+        })
     }
 
     pub fn read_position(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_PRESENT_POSITION: u8 = 0x38;
-        const RESPONSE_LEN: usize = 8;
 
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
@@ -396,26 +437,16 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         bus.write(&frame[..size])
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
-        for (cfg, s) in self.config.servos.iter().zip(state.iter_mut()) {
-            let mut rx_frame = [0u8; RESPONSE_LEN];
-            bus.read(&mut rx_frame)
-                .map_err(|_| FeetechBusError::CommunicationError)?;
-
-            let rx_payload = &rx_frame[2..RESPONSE_LEN - 1];
-            if rx_frame[RESPONSE_LEN - 1] != compute_checksum(rx_payload) {
-                return Err(FeetechBusError::CommunicationError);
-            }
-
-            let pulse = u16::from_le_bytes([rx_frame[5], rx_frame[6]]);
-            s.position = map_range(
-                pulse as f64,
+        let servos = &self.config.servos;
+        read_replies(bus, self.config, |i, params: &[u8; 2]| {
+            let cfg = &servos[i];
+            state[i].position = map_range(
+                u16::from_le_bytes(*params) as f64,
                 cfg.min_pulse as f64,
                 cfg.max_pulse as f64,
                 0f64,
                 cfg.amplitude,
             );
-        }
-
-        Ok(())
+        })
     }
 }
