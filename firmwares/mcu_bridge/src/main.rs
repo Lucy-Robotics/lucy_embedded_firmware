@@ -85,6 +85,7 @@ fn wait_reply<const N: usize>(
 ) -> Result<JointStates<N>, ReplyError> {
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut buf = [0u8; 256];
+    let mut corrupt = None;
     while Instant::now() < deadline {
         let count = match port.port.read(&mut buf) {
             Ok(count) => count,
@@ -95,11 +96,11 @@ fn wait_reply<const N: usize>(
             match decoder.push_byte(byte) {
                 Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => return Ok(states),
                 Some(Ok(_)) | None => {}
-                Some(Err(e)) => return Err(ReplyError::Corrupt(e)),
+                Some(Err(e)) => corrupt = Some(e),
             }
         }
     }
-    Err(ReplyError::Timeout)
+    Err(corrupt.map_or(ReplyError::Timeout, ReplyError::Corrupt))
 }
 
 fn node_name() -> String {
