@@ -434,6 +434,7 @@ impl ProblemLog {
         if !parts.is_empty() {
             eprintln!("Last {}s: {}", SUMMARY_PERIOD.as_secs(), parts.join(", "));
         }
+        self.reported = self.counts.map(|n| n > 0);
         self.counts = [0; 4];
         self.since = std::time::Instant::now();
     }
