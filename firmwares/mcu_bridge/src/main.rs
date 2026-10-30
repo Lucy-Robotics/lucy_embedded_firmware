@@ -159,6 +159,8 @@ const SILENT_AFTER: Duration = Duration::from_secs(3);
 
 const RETRY: Duration = Duration::from_secs(1);
 
+const BOOTLOADER_TIMEOUT: Duration = Duration::from_millis(1500);
+
 /// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
 /// owns the port: the bridge must not touch the board then.
 fn flash_lock(serial: Option<&str>) -> Option<std::path::PathBuf> {
@@ -366,6 +368,11 @@ fn run<const N: usize>(
         if answering != Some(false) && now - last_answer > SILENT_AFTER {
             answering = Some(false);
             println!("Board {label} not answering");
+            if board == Board::Mega {
+                std::thread::sleep(BOOTLOADER_TIMEOUT);
+                next_tick = Instant::now();
+                continue;
+            }
         }
         if now < next_tick {
             std::thread::sleep(next_tick - now);
