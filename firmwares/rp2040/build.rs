@@ -10,6 +10,12 @@ fn main() {
         .write_all(include_bytes!("memory.x"))
         .unwrap();
     println!("cargo:rustc-link-search={}", out.display());
+    // Sole source of bare-metal link args. Do not also set these in
+    // `.cargo/config.toml` rustflags — double -Tlink.x redefines BOOT2.
+    // build.rs is required because Pixi/pipeline may invoke cargo from a cwd
+    // where the workspace `.cargo/config.toml` is not on the config search path.
+    println!("cargo:rustc-link-arg=--nmagic");
+    println!("cargo:rustc-link-arg=-Tlink.x");
 
     println!("cargo:rerun-if-changed=memory.x");
     println!("cargo:rerun-if-changed=build.rs");
@@ -55,8 +61,9 @@ fn main() {
     }
     if !has_pwm_key && !has_i2c_pwm_key {
         panic!(
-            "{} has neither pwm: nor i2c_pwm:; refusing to build a no-op UF2. \
-             Pass a projected firmware spec (pipeline sets LUCY_FIRMWARE_CONFIG).",
+            "{} has neither pwm: nor i2c_pwm: keys (wrong file?). \
+             Pass a projected firmware spec (pipeline sets LUCY_FIRMWARE_CONFIG); \
+             empty pwm:/i2c_pwm: lists are allowed.",
             config_path.display()
         );
     }
