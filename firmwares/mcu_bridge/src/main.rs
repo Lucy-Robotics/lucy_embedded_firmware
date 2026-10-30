@@ -163,7 +163,7 @@ fn main() {
     let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000, bridge.serial);
     let mut port = match usb_config.open() {
         Ok(port) => port,
-        Err(err) => die(usb_port::user_fix(err.kind(), &bridge.device)),
+        Err(err) => die(usb_port::diagnose_open_failure(&usb_config, &bridge.device, &err)),
     };
     port.clear().ok();
 
