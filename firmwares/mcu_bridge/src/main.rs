@@ -199,7 +199,10 @@ fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
     UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
         .open(serial)
         .map(|port| (port, Board::Rp2040))
-        .or_else(|_| {
+        .or_else(|e| {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(e);
+            }
             let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial)?;
             // Opening resets the Mega; bytes sent while its bootloader runs keep it from
             // ever starting the firmware, so wait it out before the first frame.
@@ -222,7 +225,8 @@ fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Bo
                     println!("Board {label} connected");
                     return board;
                 }
-                Err(e) => format!("not found ({e})"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "not found".to_string(),
+                Err(e) => format!("cannot be opened ({e})"),
             }
         };
         if said.as_deref() != Some(state.as_str()) {
