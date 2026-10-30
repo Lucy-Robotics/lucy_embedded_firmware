@@ -119,7 +119,8 @@ fn wait_reply<const N: usize>(
     port: &mut UsbPort,
     decoder: &mut FrameDecoder<'_, N>,
     seq: u32,
-) -> Result<JointStates<N>, ReplyError> {
+    corrupt_frames: &mut u32,
+) -> Option<JointStates<JOINTS>> {
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut buf = [0u8; 256];
     let mut corrupt = None;
@@ -131,94 +132,23 @@ fn wait_reply<const N: usize>(
         };
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
-                Some(Ok(Frame {
-                    seq: s,
-                    body: Body::State(states),
-                    ..
-                })) if s == seq => return Ok(states),
-                Some(Ok(_)) | None => {}
-                Some(Err(e)) => corrupt = Some(e),
-            }
-        }
-    }
-    Err(corrupt.map_or(ReplyError::Timeout, ReplyError::Corrupt))
-}
-
-fn usb_serial() -> Option<String> {
-    std::env::args()
-        .nth(2)
-        .or_else(|| std::env::var("LUCY_USB_SERIAL").ok())
-        .filter(|s| !s.is_empty())
-}
-
-fn parse_pca_addresses(arg: &str) -> Vec<u8> {
-    arg.split(',')
-        .filter_map(|a| {
-            let a = a.trim();
-            a.strip_prefix("0x")
-                .map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
-        })
-        .collect()
-}
-
-/// Slot is `0x100 | missing bits`
-fn pca_changes(addresses: &[u8], slot: f32, last: &mut Option<u8>) -> Vec<String> {
-    let value = slot as u16;
-    if addresses.is_empty() || value & 0x100 == 0 {
-        return Vec::new();
-    }
-    let missing = value as u8;
-    let lines = addresses
-        .iter()
-        .enumerate()
-        .filter(|&(i, _)| last.is_none_or(|m| (m ^ missing) & (1 << i) != 0))
-        .map(|(i, address)| {
-            if missing & (1 << i) != 0 {
-                format!("PCA9685 {address:#04x} not answering: its servos can't move")
-            } else {
-                format!("PCA9685 {address:#04x} answering")
-            }
-        })
-        .collect();
-    *last = Some(missing);
-    lines
-}
-
-const SILENT_AFTER: Duration = Duration::from_secs(3);
-
-const RETRY: Duration = Duration::from_secs(1);
-
-const BOOTLOADER_TIMEOUT: Duration = Duration::from_millis(1500);
-
-const MEGA_RESET: Duration = Duration::from_secs(2);
-
-/// Held by flashers while avrdude owns the port
-fn flash_lock(serial: Option<&str>) -> Option<PathBuf> {
-    serial.map(|s| PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
-}
-
-fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)> {
-    let label = serial.unwrap_or("(first found)");
-    let mut said = None;
-    while !stop_requested() {
-        let state = if lock.is_some_and(|l| l.exists()) {
-            "is being flashed"
-        } else {
-            match [Board::Rp2040, Board::Mega]
-                .into_iter()
-                .find(|b| b.port_config(serial).present())
-            {
-                Some(board) => {
-                    println!("Board {label} found");
-                    let mut port = UsbPort::new(board.port_config(serial));
-                    // Opening resets the Mega: wait out its bootloader
-                    if board == Board::Mega && port.connected() {
-                        std::thread::sleep(MEGA_RESET);
-                        let _ = port.clear();
-                    }
-                    return Some((port, board));
+                Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => {
+                    *corrupt_frames = 0;
+                    return Some(states);
                 }
-                None => "not found",
+                Some(Ok(frame)) => eprintln!("Ignoring unexpected frame seq={} (waiting for {seq})", frame.seq),
+                Some(Err(e)) => {
+                    *corrupt_frames = corrupt_frames.saturating_add(1);
+                    // Old UF2s speak a different wire format; don't flood the launch log.
+                    if *corrupt_frames == 1 || *corrupt_frames == 10 || *corrupt_frames == 100 {
+                        eprintln!(
+                            "Dropping corrupt frame from rp2040: {e} (count={corrupt_frames}). \
+                             Board firmware is likely outdated vs this mcu_bridge — \
+                             Activate → flash a UF2 from the current tip, then relaunch."
+                        );
+                    }
+                }
+                None => {}
             }
         };
         if said != Some(state) {
@@ -265,6 +195,8 @@ fn main() {
     let mut decoder = FrameDecoder::<N>::new(&mut rx_buf);
     let mut frame = vec![0u8; frame_len(N)];
     let mut seq: u32 = 0;
+    let mut corrupt_frames: u32 = 0;
+    let mut missed_replies: u32 = 0;
 
     // 20 Hz looks stepped
     let period = Duration::from_millis(25);
@@ -300,34 +232,22 @@ fn main() {
             .expect("frame buffer is frame_len(N)");
 
         match port.write(&frame[..len]) {
-            Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
-                Ok(states) => {
-                    write_states(&mut shm, joints, &states);
-                    last_answer = Instant::now();
-                    last_reply = Some(last_answer);
-                    if answering != Some(true) {
-                        answering = Some(true);
-                        println!("Board {label} answering");
-                    }
-                    if board == Board::Mega {
-                        for line in pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing) {
-                            println!("{line}");
-                        }
+            Ok(()) => match wait_reply(&mut port, &mut decoder, seq, &mut corrupt_frames) {
+                Some(states) => {
+                    missed_replies = 0;
+                    write_states(&mut ass, n, &states);
+                }
+                None => {
+                    missed_replies = missed_replies.saturating_add(1);
+                    if missed_replies == 1 || missed_replies == 10 || missed_replies == 100 {
+                        eprintln!(
+                            "No state reply from rp2040 for seq={seq} (missed={missed_replies}). \
+                             If corrupt-frame warnings also appear, reflash the UF2 from this tip."
+                        );
                     }
                 }
-                Err(e) if port.connected() => {
-                    let backlog = port.bytes_to_read();
-                    let kind = match e {
-                        ReplyError::Corrupt(_) => Problem::Crc,
-                        ReplyError::Timeout | ReplyError::Io(_) => Problem::ReadIo,
-                    };
-                    problems.record(kind, || format!(
-                        "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
-                    ));
-                }
-                Err(_) => {}
             },
-            Err(e) if port.connected() => {
+            Err(e) => {
                 problems.record(Problem::Write, || {
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
