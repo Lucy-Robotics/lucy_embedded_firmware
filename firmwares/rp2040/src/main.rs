@@ -22,7 +22,11 @@ use cortex_m_rt::entry;
 use panic_halt as _;
 
 mod ws2812;
+#[allow(dead_code)]
 mod channel;
+mod table;
+mod headers;
+mod i2c_bank;
 mod board;
 use board::init;
 mod config;

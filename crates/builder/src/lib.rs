@@ -1,5 +1,8 @@
 //! YAML → Rust config codegen for RP2040 firmware builds.
 
+mod pwm_table;
+pub use pwm_table::render_static_table;
+
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -107,7 +110,7 @@ pub fn generate_config_tokens(config: &FirmwareConfig) -> TokenStream {
         let driver_var = format_ident!("{}_config", snake);
         let adapter_var = format_ident!("{}_adapter", snake);
         let driver_type = format_ident!("{}", actuator.hardware.driver);
-        let adapter_type = format_ident!("{}", actuator.modbus.adapter);
+        let _adapter_type = format_ident!("{}", actuator.modbus.adapter);
 
         let fields: Vec<TokenStream> = actuator
             .attributes
