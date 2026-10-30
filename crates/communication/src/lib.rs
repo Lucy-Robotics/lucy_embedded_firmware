@@ -174,6 +174,11 @@ impl<'a, const N: usize> FrameDecoder<'a, N> {
         Self { buf, len: 0, overflow: false }
     }
 
+    pub fn reset(&mut self) {
+        self.len = 0;
+        self.overflow = false;
+    }
+
     pub fn push_byte(&mut self, byte: u8) -> Option<Result<Frame<N>, Error>> {
         if byte != 0 {
             if self.len < self.buf.len() {

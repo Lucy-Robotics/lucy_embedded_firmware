@@ -296,13 +296,20 @@ fn run<const N: usize>(
     let mut pcas_missing = None;
     let label = serial.clone().unwrap_or_default();
     let mut last_answer = Instant::now();
-    let mut silent = false;
+    let mut answering = None;
     loop {
-        // Close the port at once when a flasher takes the lock, so avrdude has the board.
-        if lock.as_deref().is_some_and(|l| l.exists()) {
-            println!("Board {} is being flashed: releasing the port", serial.as_deref().unwrap_or(""));
+        let flashing = lock.as_deref().is_some_and(|l| l.exists());
+        if flashing || failed_writes >= 3 {
+            if flashing {
+                println!("Board {label} is being flashed: releasing the port");
+            } else {
+                println!("Board {label} stopped answering: reconnecting");
+            }
             drop(port);
             port = connect(serial.as_deref(), lock.as_deref()).0;
+            decoder.reset();
+            failed_writes = 0;
+            answering = None;
             next_tick = Instant::now();
             last_answer = next_tick;
         }
@@ -320,8 +327,8 @@ fn run<const N: usize>(
                     Ok(states) => {
                         write_states(&mut shm, joints, &states);
                         last_answer = Instant::now();
-                        if silent {
-                            silent = false;
+                        if answering != Some(true) {
+                            answering = Some(true);
                             println!("Board {label} answering");
                         }
                         if board == Board::Mega {
@@ -347,21 +354,12 @@ fn run<const N: usize>(
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
                 failed_writes += 1;
-                // Unplugged (or reset into the bootloader): reopen instead of failing forever.
-                if failed_writes >= 3 {
-                    println!("Board {} stopped answering: reconnecting", serial.as_deref().unwrap_or(""));
-                    drop(port);
-                    port = connect(serial.as_deref(), lock.as_deref()).0;
-                    failed_writes = 0;
-                    next_tick = Instant::now();
-                    last_answer = next_tick;
-                }
             }
         }
 
         let now = Instant::now();
-        if !silent && now - last_answer > SILENT_AFTER {
-            silent = true;
+        if answering != Some(false) && now - last_answer > SILENT_AFTER {
+            answering = Some(false);
             println!("Board {label} not answering");
         }
         if now < next_tick {
