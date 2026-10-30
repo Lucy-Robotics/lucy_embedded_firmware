@@ -13,10 +13,12 @@ fn main() {
 
     println!("cargo:rerun-if-changed=memory.x");
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=config.yaml");
     println!("cargo:rerun-if-env-changed=DEVICE_SERIAL_NUMBER");
 
     let config_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml");
+    if config_path.exists() {
+        println!("cargo:rerun-if-changed=config.yaml");
+    }
 
     // USB serial: env override, else config.yaml `serial_id`. Never hardcode a
     // board string — that bricks multi-Pico desks. Missing → omit (main.rs).
