@@ -1,9 +1,7 @@
 use crate::usb_port::UsbPortConfig;
 use crate::resources::Resources;
 
-pub fn init() -> Resources {
-    let cfg = UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000);
-    Resources {
-        usb0: cfg.open().expect("Failed to initialize USB port"),
-    }
+pub fn init(vid: u16, pid: u16) -> std::io::Result<Resources> {
+    let cfg = UsbPortConfig::new(vid, pid, 1_000_000);
+    Ok(Resources { usb0: cfg.open()? })
 }
