@@ -110,7 +110,7 @@ pub fn generate_config_tokens(config: &FirmwareConfig) -> TokenStream {
         let driver_var = format_ident!("{}_config", snake);
         let adapter_var = format_ident!("{}_adapter", snake);
         let driver_type = format_ident!("{}", actuator.hardware.driver);
-        let adapter_type = format_ident!("{}", actuator.modbus.adapter);
+        let _adapter_type = format_ident!("{}", actuator.modbus.adapter);
 
         let fields: Vec<TokenStream> = actuator
             .attributes
