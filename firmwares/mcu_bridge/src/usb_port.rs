@@ -93,8 +93,10 @@ fn diagnose_not_found(device: &str, expected_serial: &str, snap: &UsbSnapshot) -
         && !snap.cdc_serials.iter().any(|s| s == expected_serial)
     {
         return format!(
-            "{device}: expected USB serial {expected_serial}, but Pico CDC port(s) report \
-             serial: {}. Update boards.*.serial_id to match, save/activate, then relaunch Lucy.",
+            "{device}: board serial_id={expected_serial} is not on USB. \
+             Only other Pico CDC serial(s) are plugged in: {}. \
+             Plug in this board (or remove it from hardware YAML / use a single-board preset), \
+             then relaunch Lucy.",
             snap.cdc_serials.join(", ")
         );
     }

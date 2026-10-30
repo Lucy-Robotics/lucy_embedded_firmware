@@ -135,6 +135,7 @@ fn wait_reply(
     port: &mut UsbPort,
     decoder: &mut FrameDecoder<'_, JOINTS>,
     seq: u32,
+    corrupt_frames: &mut u32,
 ) -> Option<JointStates<JOINTS>> {
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut buf = [0u8; 256];
@@ -150,10 +151,21 @@ fn wait_reply(
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
                 Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => {
+                    *corrupt_frames = 0;
                     return Some(states);
                 }
                 Some(Ok(frame)) => eprintln!("Ignoring unexpected frame seq={} (waiting for {seq})", frame.seq),
-                Some(Err(e)) => eprintln!("Dropping corrupt frame from rp2040: {e}"),
+                Some(Err(e)) => {
+                    *corrupt_frames = corrupt_frames.saturating_add(1);
+                    // Old UF2s speak a different wire format; don't flood the launch log.
+                    if *corrupt_frames == 1 || *corrupt_frames == 10 || *corrupt_frames == 100 {
+                        eprintln!(
+                            "Dropping corrupt frame from rp2040: {e} (count={corrupt_frames}). \
+                             Board firmware is likely outdated vs this mcu_bridge — \
+                             Activate → flash a UF2 from the current tip, then relaunch."
+                        );
+                    }
+                }
                 None => {}
             }
         }
@@ -218,6 +230,8 @@ fn main() {
     let mut decoder = FrameDecoder::<JOINTS>::new(&mut rx_buf);
     let mut frame = [0u8; FRAME_LEN];
     let mut seq: u32 = 0;
+    let mut corrupt_frames: u32 = 0;
+    let mut missed_replies: u32 = 0;
 
     let period = Duration::from_millis(50);
     let mut next_tick = Instant::now();
@@ -230,9 +244,20 @@ fn main() {
         let len = encode(&request, &mut frame).expect("command frame exceeds FRAME_LEN");
 
         match port.write(&frame[..len]) {
-            Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
-                Some(states) => write_states(&mut ass, n, &states),
-                None => eprintln!("No state reply from rp2040 for seq={seq}, dropping tick"),
+            Ok(()) => match wait_reply(&mut port, &mut decoder, seq, &mut corrupt_frames) {
+                Some(states) => {
+                    missed_replies = 0;
+                    write_states(&mut ass, n, &states);
+                }
+                None => {
+                    missed_replies = missed_replies.saturating_add(1);
+                    if missed_replies == 1 || missed_replies == 10 || missed_replies == 100 {
+                        eprintln!(
+                            "No state reply from rp2040 for seq={seq} (missed={missed_replies}). \
+                             If corrupt-frame warnings also appear, reflash the UF2 from this tip."
+                        );
+                    }
+                }
             },
             Err(e) => {
                 eprintln!("Failed to write commands over serial port: {e}, dropping tick");
