@@ -31,8 +31,8 @@ struct I2cRowYaml {
 
 /// Rust source for `PWM_ROWS` and `I2C_ROWS`.
 ///
-/// Empty input yields empty tables. Invalid YAML panics so a bad spec cannot
-/// produce a silent no-op UF2.
+/// Empty tables are valid (board with no enabled actuators). Invalid YAML or a
+/// hardware-mapping file mistaken for a projected spec still panics.
 pub fn render_static_table(yaml: &str) -> String {
     let trimmed = yaml.trim();
     let spec = if trimmed.is_empty() {
@@ -107,5 +107,12 @@ i2c_pwm: []
     #[should_panic(expected = "invalid firmware spec YAML")]
     fn invalid_yaml_fails_closed() {
         let _ = render_static_table("pwm: [");
+    }
+
+    #[test]
+    fn empty_tables_are_allowed() {
+        let code = render_static_table("pwm: []\ni2c_pwm: []\n");
+        assert!(code.contains("PWM_ROWS: &[PwmRow] = &[\n];"));
+        assert!(code.contains("I2C_ROWS: &[I2cRow] = &[\n];"));
     }
 }
