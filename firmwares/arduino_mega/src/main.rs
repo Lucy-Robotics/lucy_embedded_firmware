@@ -4,7 +4,7 @@
 
 use lucy_embedded_firmware_core::joint::TorqueStatus;
 use lucy_embedded_firmware_communication::{
-    encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
+    encode, frame_len, Body, Error, Frame, FrameDecoder, JointCommands, JointStates,
 };
 
 use arduino_hal::prelude::*;
@@ -15,7 +15,7 @@ mod channel;
 #[macro_use]
 mod config;
 mod board;
-use board::init;
+use board::{init, Resources};
 mod servo_pins;
 use config::{get_robot, robot_tick, JOINTS, LINK, PCA_STATUS_SLOT};
 
@@ -55,31 +55,36 @@ fn main() -> ! {
         let Ok(byte) = resources.serial.read() else {
             continue;
         };
-        let Some(Ok(Frame { seq, body: Body::Command(commands), .. })) = decoder.push_byte(byte) else {
-            continue;
-        };
-
-        apply_commands(&mut robot, &commands);
-        robot_tick(tick, &mut robot, &mut resources);
-        tick = tick.wrapping_add(1);
-
-        // PWM servos report no position: NaN tells the hardware interface to keep echoing its
-        // command instead of publishing a made-up one.
-        let mut states = JointStates::<LINK>::default();
-        states.positions[..JOINTS].fill(f64::NAN);
-        states.positions[PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f64;
-
-        let Ok(len) = encode(&Frame::new(seq, Body::State(states)), &mut tx) else {
-            continue;
-        };
-        for (i, &b) in tx[..len].iter().enumerate() {
-            resources.serial.write_byte(b);
-            // The 16U2 USB-serial chip relays through a 128-byte ring: sent in one 1 Mbaud
-            // burst, the frame's last bytes (its CRC) overwrote bytes still queued 128 earlier.
-            // A pause per 64 bytes lets it drain; 500 us was the shortest gap clean on the bench.
-            if i % 64 == 63 {
-                arduino_hal::delay_us(TX_CHUNK_GAP_US);
+        match decoder.push_byte(byte) {
+            Some(Ok(Frame { seq, body: Body::Command(commands), .. })) => {
+                apply_commands(&mut robot, &commands);
+                robot_tick(tick, &mut robot, &mut resources);
+                tick = tick.wrapping_add(1);
+                reply(seq, &mut resources, &mut tx);
             }
+            Some(Err(Error::JointCount { .. })) => reply(0, &mut resources, &mut tx),
+            _ => {}
+        }
+    }
+}
+
+fn reply(seq: u32, resources: &mut Resources, tx: &mut [u8; FRAME_LEN]) {
+    // PWM servos report no position: NaN tells the hardware interface to keep echoing its
+    // command instead of publishing a made-up one.
+    let mut states = JointStates::<LINK>::default();
+    states.positions[..JOINTS].fill(f64::NAN);
+    states.positions[PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f64;
+
+    let Ok(len) = encode(&Frame::new(seq, Body::State(states)), tx) else {
+        return;
+    };
+    for (i, &b) in tx[..len].iter().enumerate() {
+        resources.serial.write_byte(b);
+        // The 16U2 USB-serial chip relays through a 128-byte ring: sent in one 1 Mbaud
+        // burst, the frame's last bytes (its CRC) overwrote bytes still queued 128 earlier.
+        // A pause per 64 bytes lets it drain; 500 us was the shortest gap clean on the bench.
+        if i % 64 == 63 {
+            arduino_hal::delay_us(TX_CHUNK_GAP_US);
         }
     }
 }
