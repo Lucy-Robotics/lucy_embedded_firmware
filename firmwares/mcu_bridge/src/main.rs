@@ -9,6 +9,7 @@ use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use lucy_embedded_firmware_communication::{
     encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
 };
+use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
@@ -59,6 +60,7 @@ fn bridge_args() -> BridgeArgs {
 fn open_shm(name: &str, min_len: usize) -> File {
     let c_name = CString::new(name).expect("shm name contains a NUL byte");
     let deadline = Instant::now() + SHM_OPEN_TIMEOUT;
+    let mut last_len: Option<usize> = None;
 
     loop {
         let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
@@ -66,15 +68,36 @@ fn open_shm(name: &str, min_len: usize) -> File {
             let file = unsafe { File::from_raw_fd(fd) };
             let len = match file.metadata() {
                 Ok(meta) => meta.len() as usize,
-                Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
+                Err(err) => die(format!(
+                    "Could not stat shared memory {name}: {err}. Is ros2_control running?"
+                )),
             };
+            // ros2_control shm_open()s then ftruncate()s — a too-small object usually means
+            // the hardware plugin is still creating the table. Keep waiting.
             if len < min_len {
-                die("This robot configuration does not match Lucy. Relaunch Lucy.");
+                last_len = Some(len);
+                drop(file);
+                if Instant::now() >= deadline {
+                    die(format!(
+                        "Shared memory {name} is {len} bytes after {SHM_OPEN_TIMEOUT:?}; \
+                         need at least {min_len} (SHM header). \
+                         Wait for LucySystemHardware to finish creating the table, then relaunch."
+                    ));
+                }
+                std::thread::sleep(SHM_OPEN_RETRY);
+                continue;
             }
             return file;
         }
         if Instant::now() >= deadline {
-            die("Lucy did not finish starting. Relaunch Lucy.");
+            let hint = match last_len {
+                Some(len) => format!(" Last seen size was {len} bytes (need ≥ {min_len})."),
+                None => String::new(),
+            };
+            die(format!(
+                "Shared memory {name} was not ready after {SHM_OPEN_TIMEOUT:?}.{hint} \
+                 Start the robot bringup (ros2_control) before mcu_bridge, then relaunch Lucy."
+            ));
         }
         std::thread::sleep(SHM_OPEN_RETRY);
     }
@@ -143,15 +166,39 @@ fn main() {
     let node = bridge.node;
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let shm_file = open_shm(&format!("/{node}"), size_of::<ShmHeader>());
+    let shm_name = format!("/{node}");
+    let shm_file = open_shm(&shm_name, size_of::<ShmHeader>());
 
     let table_map = match unsafe { MmapMut::map_mut(&shm_file) } {
         Ok(map) => map,
-        Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
+        Err(err) => die(format!(
+            "Could not mmap shared memory {shm_name} ({} bytes): {err}",
+            shm_file.metadata().map(|m| m.len()).unwrap_or(0)
+        )),
     };
-    let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
-        .unwrap_or_else(|_| die("Lucy could not attach to the robot. Relaunch Lucy."));
+    let map_len = table_map.len();
+    let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, map_len) }
+        .unwrap_or_else(|reason| {
+            // Peek max_actuators when the header fits so the message is actionable.
+            let declared = if map_len >= size_of::<ShmHeader>() {
+                unsafe { (*(table_map.as_ptr() as *const ShmHeader)).max_actuators }
+            } else {
+                0
+            };
+            let need = ShmHeader::size_for(declared as usize);
+            die(format!(
+                "Shared memory {shm_name} layout mismatch: {reason} \
+                 (shm={map_len} bytes, header.max_actuators={declared}, need {need} bytes). \
+                 Rebuild mcu_bridge against the current SharedTable protocol, or fix the \
+                 hardware plugin actuator count, then relaunch Lucy."
+            ))
+        });
     let n = JOINTS.min(ass.max_actuators());
+    println!(
+        "Attached to {shm_name}: {} bytes, max_actuators={}, forwarding {n}/{JOINTS} joints",
+        map_len,
+        ass.max_actuators()
+    );
     if ass.max_actuators() != JOINTS {
         eprintln!(
             "Warning: shm declares {} joints but the rp2040 link carries {JOINTS}; only the first {n} are forwarded",
