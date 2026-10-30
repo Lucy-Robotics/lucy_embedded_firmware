@@ -93,8 +93,10 @@ fn read_commands<B: usb_device::bus::UsbBus>(
 }
 
 fn apply_commands<const N: usize>(robot: &mut Robot<N>, commands: &JointCommands<N>) {
-    for (i, joint) in robot.joints_command.iter_mut().enumerate() {
-        joint.position = commands.positions[i];
+    for i in 0..N {
+        let position = robot.clamp_position(i, commands.positions[i]);
+        let joint = &mut robot.joints_command[i];
+        joint.position = position;
         joint.velocity = commands.velocities[i];
         joint.acceleration = commands.accelerations[i];
         joint.torque_enabled = if commands.torque_enabled[i] {
