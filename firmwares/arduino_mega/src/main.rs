@@ -21,6 +21,7 @@ use config::{get_robot, robot_tick, JOINTS, LINK, PCA_STATUS_SLOT};
 
 const FRAME_LEN: usize = frame_len(LINK);
 const TX_CHUNK_GAP_US: u32 = 500;
+const COMMAND_TIMEOUT_TICKS: u16 = (200_000 / 64) as u16;
 
 fn apply_commands(robot: &mut lucy_embedded_firmware_core::robot::Robot<JOINTS>, commands: &JointCommands<LINK>) {
     for i in 0..JOINTS {
@@ -46,13 +47,22 @@ fn main() -> ! {
     let mut decoder = FrameDecoder::<LINK>::new(&mut rx);
     let mut tx = [0u8; FRAME_LEN];
     let mut tick: u64 = 0;
+    let mut last_command: Option<u16> = None;
 
     // Request/response with mcu_bridge: the USART has a 2-byte FIFO, so only poll bytes
     // while a command frame streams in, and do the slow work once it is complete.
     // The servos are only driven after the first valid command frame; a corrupt frame is
     // dropped at its 0x00 delimiter and the bridge times out and resends.
     loop {
+        let now = resources.clock.tcnt1().read().bits();
         let Ok(byte) = resources.serial.read() else {
+            if last_command.is_some_and(|t| now.wrapping_sub(t) > COMMAND_TIMEOUT_TICKS) {
+                for joint in robot.joints_command.iter_mut() {
+                    joint.torque_enabled = TorqueStatus::Disabled;
+                }
+                robot_tick(tick, &mut robot, &mut resources);
+                last_command = None;
+            }
             continue;
         };
         match decoder.push_byte(byte) {
@@ -60,6 +70,7 @@ fn main() -> ! {
                 apply_commands(&mut robot, &commands);
                 robot_tick(tick, &mut robot, &mut resources);
                 tick = tick.wrapping_add(1);
+                last_command = Some(now);
                 reply(seq, &mut resources, &mut tx);
             }
             Some(Err(Error::JointCount { .. })) => reply(0, &mut resources, &mut tx),
