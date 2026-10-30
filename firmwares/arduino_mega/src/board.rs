@@ -15,6 +15,8 @@ pub struct Resources {
 
     // GENERATED
     pub pca: Pca9685Bank<arduino_hal::I2c>,
+
+    pub clock: arduino_hal::pac::TC1,
 }
 
 pub fn init() -> Resources {
@@ -47,5 +49,7 @@ pub fn init() -> Resources {
     // Nervo ribbon servos on Mega pins, pulsed by Timer5.
     crate::servo_pins::init(dp.TC5, mega_servo_pins!(pins));
 
-    Resources { serial, pca }
+    dp.TC1.tccr1b().write(|w| w.cs1().prescale_1024());
+
+    Resources { serial, pca, clock: dp.TC1 }
 }
