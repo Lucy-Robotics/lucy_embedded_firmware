@@ -8,6 +8,7 @@ use crate::usb_port::UsbPort;
 use crate::resources::Resources;
 
 use core::f64::consts::{PI, TAU};
+use std::io::Write;
 
 pub const JOINTS_CONFIG: [CommandConfig; 6] = [
     CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
@@ -42,11 +43,25 @@ pub fn robot_tick(
     robot: &mut Robot<6>,
     resources: &mut Resources,
 ) {
-    let mut driver: FeetechBusDriver<UsbPort, 6> = FeetechBusDriver::<UsbPort, 6>::new(&FEETECH_0);
-    let _ = driver.update(
+    let _ = driver().update(
         tick,
         &mut resources.usb0,
         &mut robot.joints_command[0..6],
         &mut robot.joints_state[0..6],
     );
+}
+
+pub fn robot_release(resources: &mut Resources) {
+    let mut driver = driver();
+    let mut ok = false;
+    for _ in 0..2 {
+        ok |= driver.set_torque(&mut resources.usb0, &[Command::default(); 6]).is_ok();
+    }
+    if !ok {
+        let _ = writeln!(std::io::stderr(), "Warning: torque off failed, the servos may still hold");
+    }
+}
+
+fn driver() -> FeetechBusDriver<UsbPort, 6> {
+    FeetechBusDriver::new(&FEETECH_0)
 }
