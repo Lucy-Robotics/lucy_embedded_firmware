@@ -1,0 +1,25 @@
+name: Build
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - run: cargo test --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder
+
+  rp2040:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmwares/rp2040
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add thumbv6m-none-eabi
+      - run: cargo build --release
+
