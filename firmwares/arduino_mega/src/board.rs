@@ -15,6 +15,8 @@ pub struct Resources {
 
     // GENERATED
     pub pca: Pca9685Bank<arduino_hal::I2c>,
+
+    pub clock: arduino_hal::pac::TC1,
 }
 
 pub fn init() -> Resources {
@@ -24,12 +26,20 @@ pub fn init() -> Resources {
     // Host link over the on-board USB-serial chip; matches mcu_bridge's 1M baud.
     let serial = arduino_hal::default_serial!(dp, pins, 1_000_000);
 
+    let mut scl = pins.d21.into_output_high();
+    for _ in 0..9 {
+        scl.set_low();
+        arduino_hal::delay_us(5);
+        scl.set_high();
+        arduino_hal::delay_us(5);
+    }
+
     // Hardware I2C is D20 (SDA) / D21 (SCL). 400 kHz keeps 18 servo writes to ~3 ms of the
     // 25 ms bridge tick (100 kHz would take ~10 ms); the PCA9685 is rated to 1 MHz.
     let i2c = arduino_hal::I2c::new(
         dp.TWI,
         pins.d20.into_pull_up_input(),
-        pins.d21.into_pull_up_input(),
+        scl.into_pull_up_input(),
         400_000,
     );
     let mut pca = Pca9685Bank { i2c, addresses: &crate::config::PCA_ADDRESSES };
@@ -39,5 +49,7 @@ pub fn init() -> Resources {
     // Nervo ribbon servos on Mega pins, pulsed by Timer5.
     crate::servo_pins::init(dp.TC5, mega_servo_pins!(pins));
 
-    Resources { serial, pca }
+    dp.TC1.tccr1b().write(|w| w.cs1().prescale_1024());
+
+    Resources { serial, pca, clock: dp.TC1 }
 }

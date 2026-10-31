@@ -35,6 +35,7 @@ pub const PWM_0: PwmServoConfig = PwmServoConfig {
 // Board table checks: limits fit the travel PWM_0 maps, each driven slot exists, and each
 // output exists and drives one slot; pin pulses fit one 20 ms frame.
 const _: () = {
+    assert!(JOINTS <= 24);
     assert!(PCA_ADDRESSES.len() <= 8);
     assert!(MEGA_PINS.len() <= 8);
     let mut i = 0;
