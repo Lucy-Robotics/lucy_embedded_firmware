@@ -85,6 +85,7 @@ fn wait_reply<const N: usize>(
 ) -> Result<JointStates<N>, ReplyError> {
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut buf = [0u8; 256];
+    let mut corrupt = None;
     while Instant::now() < deadline {
         let count = match port.port.read(&mut buf) {
             Ok(count) => count,
@@ -95,11 +96,11 @@ fn wait_reply<const N: usize>(
             match decoder.push_byte(byte) {
                 Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => return Ok(states),
                 Some(Ok(_)) | None => {}
-                Some(Err(e)) => return Err(ReplyError::Corrupt(e)),
+                Some(Err(e)) => corrupt = Some(e),
             }
         }
     }
-    Err(ReplyError::Timeout)
+    Err(corrupt.map_or(ReplyError::Timeout, ReplyError::Corrupt))
 }
 
 fn node_name() -> String {
@@ -158,6 +159,8 @@ const SILENT_AFTER: Duration = Duration::from_secs(3);
 
 const RETRY: Duration = Duration::from_secs(1);
 
+const BOOTLOADER_TIMEOUT: Duration = Duration::from_millis(1500);
+
 /// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
 /// owns the port: the bridge must not touch the board then.
 fn flash_lock(serial: Option<&str>) -> Option<std::path::PathBuf> {
@@ -199,7 +202,10 @@ fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
     UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
         .open(serial)
         .map(|port| (port, Board::Rp2040))
-        .or_else(|_| {
+        .or_else(|e| {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(e);
+            }
             let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial)?;
             // Opening resets the Mega; bytes sent while its bootloader runs keep it from
             // ever starting the firmware, so wait it out before the first frame.
@@ -222,7 +228,8 @@ fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Bo
                     println!("Board {label} connected");
                     return board;
                 }
-                Err(e) => format!("not found ({e})"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "not found".to_string(),
+                Err(e) => format!("cannot be opened ({e})"),
             }
         };
         if said.as_deref() != Some(state.as_str()) {
@@ -296,13 +303,20 @@ fn run<const N: usize>(
     let mut pcas_missing = None;
     let label = serial.clone().unwrap_or_default();
     let mut last_answer = Instant::now();
-    let mut silent = false;
+    let mut answering = None;
     loop {
-        // Close the port at once when a flasher takes the lock, so avrdude has the board.
-        if lock.as_deref().is_some_and(|l| l.exists()) {
-            println!("Board {} is being flashed: releasing the port", serial.as_deref().unwrap_or(""));
+        let flashing = lock.as_deref().is_some_and(|l| l.exists());
+        if flashing || failed_writes >= 3 {
+            if flashing {
+                println!("Board {label} is being flashed: releasing the port");
+            } else {
+                println!("Board {label} stopped answering: reconnecting");
+            }
             drop(port);
             port = connect(serial.as_deref(), lock.as_deref()).0;
+            decoder.reset();
+            failed_writes = 0;
+            answering = None;
             next_tick = Instant::now();
             last_answer = next_tick;
         }
@@ -320,8 +334,8 @@ fn run<const N: usize>(
                     Ok(states) => {
                         write_states(&mut shm, joints, &states);
                         last_answer = Instant::now();
-                        if silent {
-                            silent = false;
+                        if answering != Some(true) {
+                            answering = Some(true);
                             println!("Board {label} answering");
                         }
                         if board == Board::Mega {
@@ -347,22 +361,18 @@ fn run<const N: usize>(
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
                 failed_writes += 1;
-                // Unplugged (or reset into the bootloader): reopen instead of failing forever.
-                if failed_writes >= 3 {
-                    println!("Board {} stopped answering: reconnecting", serial.as_deref().unwrap_or(""));
-                    drop(port);
-                    port = connect(serial.as_deref(), lock.as_deref()).0;
-                    failed_writes = 0;
-                    next_tick = Instant::now();
-                    last_answer = next_tick;
-                }
             }
         }
 
         let now = Instant::now();
-        if !silent && now - last_answer > SILENT_AFTER {
-            silent = true;
+        if answering != Some(false) && now - last_answer > SILENT_AFTER {
+            answering = Some(false);
             println!("Board {label} not answering");
+            if board == Board::Mega {
+                std::thread::sleep(BOOTLOADER_TIMEOUT);
+                next_tick = Instant::now();
+                continue;
+            }
         }
         if now < next_tick {
             std::thread::sleep(next_tick - now);
@@ -431,6 +441,7 @@ impl ProblemLog {
         if !parts.is_empty() {
             eprintln!("Last {}s: {}", SUMMARY_PERIOD.as_secs(), parts.join(", "));
         }
+        self.reported = self.counts.map(|n| n > 0);
         self.counts = [0; 4];
         self.since = std::time::Instant::now();
     }
