@@ -1,0 +1,14 @@
+name: Workspace E2E
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    uses: Lucy-Robotics/lucy_ws/.github/workflows/install-and-launch.yml@dev
