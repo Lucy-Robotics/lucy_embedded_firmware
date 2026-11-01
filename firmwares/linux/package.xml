@@ -4,7 +4,7 @@
   <name>lucy_embedded_firmware_x86_64</name>
   <version>0.1.0</version>
   <description>x86-64</description>
-  <maintainer email="contact@sentience-robotics.fr">Lucy Robotics Team</maintainer>
+  <maintainer email="contact@lucy-robotics.com">Lucy Robotics Team</maintainer>
   <license>GPL-3.0</license>
 
   <export>
