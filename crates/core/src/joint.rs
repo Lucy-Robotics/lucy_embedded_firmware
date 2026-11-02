@@ -35,5 +35,5 @@ pub struct Command {
 pub struct State {
     pub position: f64,
     pub temperature: f64,
-    pub torque: f64,
+    pub effort: f64,
 }

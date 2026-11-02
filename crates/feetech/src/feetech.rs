@@ -218,7 +218,7 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
         let feedback = self.read_position(bus, state);
         let extra = match tick % 10 {
             0 => self.read_temperature(bus, state),
-            1 => self.read_torque(bus, state),
+            1 => self.read_effort(bus, state),
             _ => Ok(()),
         };
         torque.and(position).and(feedback).and(extra)
@@ -369,7 +369,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         })
     }
 
-    pub fn read_torque(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_effort(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
         const REG_LOAD: u8 = 0x3C;
 
         if state.len() != N {
@@ -403,7 +403,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             let raw = u16::from_le_bytes(*params);
             let magnitude = (raw & 0x3FF) as f64 / 1000.0;
             let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
-            state[i].torque = sign * magnitude;
+            state[i].effort = sign * magnitude;
         })
     }
 
