@@ -7,7 +7,7 @@ use postcard::ser_flavors::{Cobs, Flavor, Slice};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-pub const PROTOCOL_VERSION: u8 = 1;
+pub const PROTOCOL_VERSION: u8 = 2;
 
 static FRAME_CRC: Crc<u16> = Crc::<u16>::new(&CRC_16_MODBUS);
 
@@ -45,11 +45,15 @@ impl<const N: usize> Default for JointCommands<N> {
 pub struct JointStates<const N: usize> {
     #[serde(with = "BigArray")]
     pub positions: [f64; N],
+    #[serde(with = "BigArray")]
+    pub temperatures: [f64; N],
+    #[serde(with = "BigArray")]
+    pub efforts: [f64; N],
 }
 
 impl<const N: usize> Default for JointStates<N> {
     fn default() -> Self {
-        Self { positions: [0.0; N] }
+        Self { positions: [0.0; N], temperatures: [0.0; N], efforts: [0.0; N] }
     }
 }
 

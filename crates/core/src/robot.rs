@@ -39,6 +39,8 @@ impl<const M: usize> Robot<M> {
         let n = M.min(shm.max_actuators());
         for i in 0..n {
             shm.hw_positions_mut()[i] = self.joints_state[i].position;
+            shm.hw_temperatures_mut()[i] = self.joints_state[i].temperature;
+            shm.hw_efforts_mut()[i] = self.joints_state[i].effort;
         }
     }
 }
