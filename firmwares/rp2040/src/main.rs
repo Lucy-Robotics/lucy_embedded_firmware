@@ -114,7 +114,11 @@ fn disable_torque<const N: usize>(robot: &mut Robot<N>) {
 }
 
 fn collect_states<const N: usize>(robot: &Robot<N>) -> JointStates<N> {
-    JointStates { positions: robot.joints_state.map(|joint| joint.position) }
+    JointStates {
+        positions: robot.joints_state.map(|joint| joint.position),
+        temperatures: robot.joints_state.map(|joint| joint.temperature),
+        efforts: robot.joints_state.map(|joint| joint.effort),
+    }
 }
 
 #[unsafe(link_section = ".boot2")]

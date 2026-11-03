@@ -74,6 +74,8 @@ fn read_commands<const N: usize>(shm: &SharedTable, n: usize) -> JointCommands<N
 fn write_states<const N: usize>(shm: &mut SharedTable, n: usize, states: &JointStates<N>) {
     shm.header().state_seq.fetch_add(1, Ordering::SeqCst);
     shm.hw_positions_mut()[..n].copy_from_slice(&states.positions[..n]);
+    shm.hw_temperatures_mut()[..n].copy_from_slice(&states.temperatures[..n]);
+    shm.hw_efforts_mut()[..n].copy_from_slice(&states.efforts[..n]);
     shm.header().state_seq.fetch_add(1, Ordering::SeqCst);
 }
 
