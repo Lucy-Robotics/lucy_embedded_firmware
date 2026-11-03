@@ -14,7 +14,9 @@ use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
+mod link_file;
 mod usb_port;
+use link_file::LinkFile;
 use usb_port::{UsbPort, UsbPortConfig};
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
@@ -232,6 +234,7 @@ fn main() {
     let mut seq: u32 = 0;
     let mut corrupt_frames: u32 = 0;
     let mut missed_replies: u32 = 0;
+    let mut link = LinkFile::for_node(&node);
 
     let period = Duration::from_millis(50);
     let mut next_tick = Instant::now();
@@ -248,6 +251,7 @@ fn main() {
                 Some(states) => {
                     missed_replies = 0;
                     write_states(&mut ass, n, &states);
+                    link.record();
                 }
                 None => {
                     missed_replies = missed_replies.saturating_add(1);
