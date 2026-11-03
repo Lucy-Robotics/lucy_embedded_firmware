@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(commands.positions, [1.0, 2.0, 0.0]);
         assert_eq!(commands.torque_enabled, [true, false, false]);
 
-        write_states(&mut shm, 2, &JointStates { positions: [f64::NAN, 5.0, 256.0] });
+        write_states(&mut shm, 2, &JointStates { positions: [f64::NAN, 5.0, 256.0], ..JointStates::default() });
         assert!(shm.hw_positions()[0].is_nan());
         assert_eq!(&shm.hw_positions()[1..], [5.0, 0.0]);
         assert_eq!(shm.header().state_seq.load(Ordering::SeqCst), 2);
