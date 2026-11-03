@@ -9,7 +9,7 @@ Detail for **`lucy_embedded_firmware`**.
 
 ## Control path
 
-Host `LucySystemHardware` exchanges **`f64` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM.
+Host `LucySystemHardware` exchanges **`f64` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM. One hardware interface and one host↔MCU bridge process run per board that has a non-empty USB `serial_id`. The bridge copies the whole table. It does not interpret plugs.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
@@ -17,110 +17,89 @@ flowchart TB
   HI["LucySystemHardware"]
   SHM["POSIX_SHM_f64_JointTable"]
   LinuxFW["firmwares_linux"]
-  Bridge["host_to_MCU_bridge"]
-  S2040["rp2040_servo2040"]
+  Bridge["mcu_bridge"]
+  S2040["firmwares_rp2040"]
   HI <-->|"f64 rad + seq"| SHM
   SHM <-->|"SO101_host_USB_Feetech"| LinuxFW
   SHM <-->|"not_on_MCU"| Bridge
-  Bridge <-->|"CDC_or_serial"| S2040
-  S2040 -->|"HAS_PWM"| PWM["PwmBank"]
-  S2040 -->|"HAS_BUS UART0 Feetech"| Bus["BusBank"]
-  S2040 -->|"HAS_I2C_PWM"| I2C["I2cPcaBank"]
-  S2040 -->|"HAS_ADC"| ADC["AdcBank"]
+  Bridge <-->|"USB_CDC"| S2040
+  S2040 -->|"table non-empty"| PWM["hardware_PWM_headers"]
+  S2040 -->|"table non-empty"| I2C["PCA9685_on_I2C0"]
   linkStyle default stroke:#00FF41,stroke-width:2px
 ```
 
 | Robot / profile | Path |
 |-----------------|------|
-| **SO-ARM101** | Prefer `firmwares/linux` mmaps SHM → **USB serial** Feetech. Alternate: Servo2040 `bus_servo_only` → UART0 Feetech behind the host↔MCU bridge. |
-| **InMoov** | Servo2040 PWM / I2C-PCA / ADC profiles (`board_class`) behind the host↔MCU bridge. |
+| **SO-ARM101** | `firmwares/linux` mmaps SHM → **USB serial** Feetech. |
+| **InMoov / Thais** | Servo2040 behind one `mcu_bridge` per board. Header plugs are hardware PWM. A PCA9685 hangs off the Qw/ST I2C port of that same Pico. |
 
-Feetech on Servo2040 is **UART half-duplex** (GPIO0 TX, GPIO1 RX, GPIO2 DIR @ 1 Mbaud) — not “Bus” as a protocol name beyond the bank type.
+**ABI:** ros `ActuatorSharedState` uses flat `double[MAX_ACTUATORS]` (`MAX_ACTUATORS=32`). Firmware `JointTable<N>` nests `CommandBlock` / `StateBlock` / `HeartbeatBlock`. Field sets match for the same `N`. SHM slot index is the actuator `virtual_pin`.
 
-**ABI:** ros [`ActuatorSharedState`](https://github.com/Lucy-Robotics/lucy_ros_packages/pull/63) uses flat `double[MAX_ACTUATORS]` (`MAX_ACTUATORS=32`). Firmware `JointTable<N>` nests `CommandBlock` / `StateBlock` / `HeartbeatBlock`. Field sets match for the same `N`; agree `N` before overlaying host and MCU consumers.
+## What turns a bank on
+
+Robot hardware YAML is the user document. The generator projects one firmware spec per board. Plugs in that spec fill the tables. `board_class` is only a label stored on save (`internal_servo_i2c_pwm` when the board has an I2C device, otherwise `internal_servo_only` for these PWM boards). The generator does not choose a C template from that label.
+
+A bank initializes only when its generated table is non-empty. An empty PWM table leaves the PWM slices off. An empty I2C table leaves I2C off. Header PWM and I2C PCA9685 can both be non-empty on the same Pico.
+
+`bus_servo_only` (UART Feetech) and the ADC bank stay in the architecture and are not part of the header-PWM image. That image does not initialize UART, so GPIO0, GPIO1, and GPIO16 remain Servo1, Servo2, and Servo17.
 
 ## Crate layout
 
-**UML Component** — YAML codegen into shared banks and thin board mains.
+Banks live in the crates on `dev`. There is no `rp2040_support` package.
+
+**UML Component** — the per-board spec is a build input of `firmwares/rp2040`.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
 flowchart TB
-  YAML["config.yaml"] -.-> Builder["builder_build_dep"]
+  YAML["per_board_firmware_yaml"] -.-> Builder["crates_builder"]
   Builder -.-> Cfg["GENERATED_tables"]
-  subgraph support ["rp2040_support"]
+  subgraph rp2040 ["firmwares_rp2040"]
     USB["USB_CDC"]
-    Link["host_link_CDC"]
-    PWM["PwmBank"]
-    UartBus["BusBank_UART0_Feetech"]
-    I2C["I2cPwmBank_PCA9685"]
-    ADC["AdcBank"]
+    PWM["hardware_PWM"]
+    I2C["PCA9685"]
   end
   Cfg --> USB
-  Cfg --> Link
-  Cfg -->|"HAS_PWM"| PWM
-  Cfg -->|"HAS_BUS"| UartBus
-  Cfg -->|"HAS_I2C_PWM"| I2C
-  Cfg -->|"HAS_ADC"| ADC
-  Core["lucy_embedded_firmware_core"]
-  support --> Core
-  S2040["rp2040_servo2040"] --> support
-  S2040 -.-> Builder
+  Cfg -->|"pwm table"| PWM
+  Cfg -->|"i2c_pwm table"| I2C
+  PwmCrate["crates_pwm"] --> PWM
+  PwmCrate --> I2C
+  Core["crates_core"]
+  rp2040 --> Core
   Linux["firmwares_linux"] --> Core
   linkStyle default stroke:#00FF41,stroke-width:2px
 ```
 
-Cargo reality: **`rp2040_support` depends on `core`**; **`builder` is a build-dependency of the board firmware**, not of `core`. Host Feetech lives under `firmwares/linux` and mmaps the same SHM contract.
+`crates/pwm` owns the only radians-to-microseconds map (`pulse_width_us`). The header bank and the PCA9685 driver both call it. `crates/builder` is a build dependency of `firmwares/rp2040`. Host Feetech stays in `firmwares/linux`.
 
-**UML Class (support banks)**
+UART Feetech (`crates/feetech`) and an ADC bank remain available as later tables. They are not compiled into the header-PWM image described here.
 
-```mermaid
-classDiagram
-  class rp2040_support {
-    <<utility>>
-    +PicoToolReset
-    +build_usb_device()
-  }
-  class PwmBank
-  class BusBank
-  class I2cPwmBank
-  class AdcBank
-  class Rp2040UartChannel
+## Header PWM
 
-  rp2040_support ..> PwmBank : provides
-  rp2040_support ..> BusBank : provides
-  rp2040_support ..> I2cPwmBank : provides
-  rp2040_support ..> AdcBank : provides
-  BusBank --> Rp2040UartChannel : UART0_Feetech
-```
+Servo N is GPIO N−1. The slice runs at 50 Hz: `div_int = 125`, `top = 19999` (1 µs ticks at 125 MHz).
 
-Rust names: `BusBank` = UART0 Feetech/STS; `I2cPwmBank` = PCA9685 over **I2C**. Builder **rejects** YAML that enables UART bus together with PWM on Servo1–3 (GPIO0–2), and rejects `UART` ≠ 0 on Servo2040.
+The RP2040 has 16 hardware PWM channels and the board has 18 headers. Servo1 (GPIO0) and Servo17 (GPIO16) share PWM slice 0 channel A. Servo2 (GPIO1) and Servo18 (GPIO17) share slice 0 channel B. A plug on either end works. Driving both ends of a pair yields one pulse on both horns, so the hardware schema rejects that pair. PIO is deferred until a board must command both ends to different widths.
 
-## Board → package
+I2C0 on the Qw/ST port (GPIO20 SDA, GPIO21 SCL, 3.3 V) is not a header. Those pins in I2C mode do not force Servo5 and Servo6, which share PWM slice 2 with GPIO20 and GPIO21, onto the same pulse. Pin function is per pin. Header PWM and a PCA9685 therefore coexist on one Pico.
 
-| Physical board | Package | Enabled banks (from robot YAML `board_class`) |
-|----------------|---------|------------------------------------------------|
-| Pimoroni Servo2040 | `rp2040_servo2040` | `internal_servo_only` → PWM<br>`internal_servo_i2c_pwm` → PWM + I2C PCA9685<br>`bus_servo_only` → UART0 Feetech (`HAS_BUS`) |
-| Host (SO-ARM101) | `firmwares/linux` | USB serial Feetech from f64 SHM |
+## PCA9685
 
-`board_class` is a **profile**; banks initialize only when `GENERATED_HAS_*` is true. PWM + UART0 can coexist only if PWM uses pads **outside** GPIO0–2 (builder-enforced).
+One I2C init per Pico at 400 kHz. Every PCA9685 on that board shares the bus and differs by 7-bit address (`0x40`–`0x7F`, default `0x40`). Servo power is not the Qw/ST 3.3 V pin. `OE` is held low by the breakout.
 
-## Codegen device tables
+| Table row | Identity |
+|-----------|----------|
+| Header PWM | `ServoN` |
+| PCA9685 channel | `I2C0:PCA9685:<address>:<channel>` |
 
-| Table | Hardware identity | Bank / wire |
-|-------|-------------------|-------------|
-| `GENERATED_PWM_DEVICES` | `PwmGpio` (`ServoN`) | `PwmBank` (RP2040 PWM) |
-| `GENERATED_BUS_DEVICES` | `UartBus` (`UART0:id`) | `BusBank` → **UART0** half-duplex Feetech |
-| `GENERATED_I2C_PWM_DEVICES` | `I2cPwm` (`I2C0:PCA9685:N`) | `I2cPwmBank` → **I2C** to PCA9685 |
-| `GENERATED_ADC_DEVICES` | `Adc` (`ADC0`…) | `AdcBank` |
+`PRE_SCALE` is `121` for 50 Hz on the 25 MHz oscillator, written only while `MODE1` SLEEP is set. Outputs are totem-pole (`MODE2` OUTDRV). Channel N starts at register `0x06 + 4 * N`. Torque-off is duty 0 on a header and the PCA9685 full-OFF bit on a channel.
 
 ## Angles
 
 | Layer | Unit |
 |-------|------|
 | Robot YAML / HI command interfaces | **radians** |
-| Host SHM (`ActuatorSharedState` / `JointTable`) | **`f64` radians** + sequence counters |
-| Feetech / PWM drivers | rad ↔ STS ticks or PWM pulse at the driver edge |
+| Host SHM | **`f64` radians** + sequence counters |
+| `pulse_width_us` and both banks | microseconds at the driver edge |
 
 ## Related
 
