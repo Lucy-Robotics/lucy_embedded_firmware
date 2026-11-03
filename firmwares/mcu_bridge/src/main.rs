@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use memmap2::MmapMut;
 
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 use lucy_embedded_firmware_communication::{
     encode, frame_len, Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates,
 };
+use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
@@ -18,7 +18,16 @@ mod usb_port;
 use usb_port::{UsbPort, UsbPortConfig};
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
-const RP2040_JOINTS: usize = 6;
+const RP2040_JOINTS: usize = 32;
+
+fn die(message: impl std::fmt::Display) -> ! {
+    let message = message.to_string();
+    eprintln!("{message}");
+    // The launcher TUI reads these when the Real Hardware row is CRASHED.
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_status", "1\n");
+    let _ = std::fs::write("/tmp/.lucy_real_hardware_error", &message);
+    std::process::exit(1);
+}
 
 /// A Mega replies within ~10 ms; past this the tick is dropped and the next one resends.
 const REPLY_TIMEOUT: Duration = Duration::from_millis(60);
@@ -43,7 +52,7 @@ impl std::fmt::Display for ReplyError {
             ReplyError::Io(e) => write!(f, "io error ({:?}): {e}", e.kind()),
             // Bytes *did* arrive up to a 0x00 delimiter, but they don't decode to a frame:
             // framing/corruption on the wire, not a dead link.
-            ReplyError::Corrupt(e) => write!(f, "corrupt frame ({e})"),
+            ReplyError::Corrupt(e) => write!(f, "corrupt frame ({e}); reflash the board if its firmware is older than this mcu_bridge"),
         }
     }
 }
@@ -199,16 +208,20 @@ fn attach_shm(name: &str, min_len: usize) -> File {
     }
 }
 
+fn pico_config(serial: Option<&str>) -> UsbPortConfig {
+    UsbPortConfig::new(usb_port::PICO_VID, usb_port::PICO_PID, 1_000_000, serial.unwrap_or_default())
+}
+
 /// RP2040 first, else Arduino Mega 2560.
 fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
-    UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
-        .open(serial)
+    pico_config(serial)
+        .open()
         .map(|port| (port, Board::Rp2040))
         .or_else(|e| {
             if e.kind() != std::io::ErrorKind::NotFound {
                 return Err(e);
             }
-            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial)?;
+            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000, serial.unwrap_or_default()).open()?;
             // Opening resets the Mega; bytes sent while its bootloader runs keep it from
             // ever starting the firmware, so wait it out before the first frame.
             std::thread::sleep(Duration::from_secs(2));
@@ -223,19 +236,18 @@ fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Bo
     let mut said: Option<String> = None;
     loop {
         let state = if lock.is_some_and(|l| l.exists()) {
-            "is being flashed".to_string()
+            "being flashed.".to_string()
         } else {
             match open_board(serial) {
                 Ok(board) => {
                     println!("Board {label} connected");
                     return board;
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "not found".to_string(),
-                Err(e) => format!("cannot be opened ({e})"),
+                Err(e) => usb_port::diagnose_open_failure(&pico_config(serial), label, &e),
             }
         };
         if said.as_deref() != Some(state.as_str()) {
-            println!("Board {label} {state}, waiting");
+            println!("Board {label}: {state} Waiting.");
             said = Some(state);
         }
         std::thread::sleep(RETRY);
@@ -246,11 +258,28 @@ fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let shm_file = attach_shm(&format!("/{node}"), size_of::<ShmHeader>());
+    let shm_name = format!("/{node}");
+    let shm_file = attach_shm(&shm_name, size_of::<ShmHeader>());
 
-    let mut table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let shm = unsafe { SharedTable::from_raw(table_map.as_mut_ptr(), table_map.len()) }
-        .unwrap_or_else(|e| panic!("invalid shm layout: {e}"));
+    let mut table_map = match unsafe { MmapMut::map_mut(&shm_file) } {
+        Ok(map) => map,
+        Err(err) => die(format!(
+            "Could not mmap shared memory {shm_name} ({} bytes): {err}",
+            shm_file.metadata().map(|m| m.len()).unwrap_or(0)
+        )),
+    };
+    let map_len = table_map.len();
+    let shm = unsafe { SharedTable::from_raw(table_map.as_mut_ptr(), map_len) }
+        .unwrap_or_else(|reason| {
+            let declared = unsafe { (*(table_map.as_ptr() as *const ShmHeader)).max_actuators };
+            die(format!(
+                "Shared memory {shm_name} layout mismatch: {reason} \
+                 (shm={map_len} bytes, header.max_actuators={declared}, need {} bytes). \
+                 Rebuild mcu_bridge against the current SharedTable protocol, or fix the \
+                 hardware plugin actuator count, then relaunch Lucy.",
+                ShmHeader::size_for(declared as usize)
+            ))
+        });
 
     let serial = usb_serial();
     let lock = flash_lock(serial.as_deref());

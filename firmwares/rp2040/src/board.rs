@@ -1,17 +1,16 @@
-use crate::channel::Rp2040UartChannel;
-use crate::channel::Rp2040PwmChannel;
+use crate::i2c_bank::I2cBank;
 use crate::ws2812::QWs2812;
 use core::option::Option;
 
 use rp2040_hal::pio::PIOExt;
 use rp2040_hal::{
     gpio,
-    uart,
     pac,
     clocks,
     usb,
     pio,
     pwm,
+    I2C,
 
     Sio,
     Timer,
@@ -20,25 +19,24 @@ use rp2040_hal::{
 };
 use rp2040_hal::fugit::RateExtU32;
 
-pub type Uart0Channel = Rp2040UartChannel<
-    gpio::Pin<gpio::bank0::Gpio16, gpio::FunctionSioOutput, gpio::PullDown>,
-    pac::UART0,
-    (gpio::Pin<gpio::bank0::Gpio0, gpio::FunctionUart, gpio::PullDown>, gpio::Pin<gpio::bank0::Gpio1, gpio::FunctionUart, gpio::PullDown>)>;
+use crate::headers::KeptPins;
 
-pub type Servo3Channel = Rp2040PwmChannel<pwm::Channel<pwm::Slice<pwm::Pwm1, pwm::FreeRunning>, pwm::A>>;
-
+pub type ServoI2c = I2C<
+    pac::I2C0,
+    (
+        gpio::Pin<gpio::bank0::Gpio20, gpio::FunctionI2C, gpio::PullUp>,
+        gpio::Pin<gpio::bank0::Gpio21, gpio::FunctionI2C, gpio::PullUp>,
+    ),
+>;
 
 pub struct Resources {
-    // MANDATORY
     pub watchdog: Watchdog,
     pub usb_bus: Option<usb::UsbBus>,
     pub timer: Timer,
     pub delay: cortex_m::delay::Delay,
     pub ws: Option<QWs2812<pac::PIO0, pio::SM0, gpio::Pin<gpio::bank0::Gpio18, gpio::FunctionPio0, gpio::PullDown>, 6>>,
-
-    // GENERATED
-    pub uart0: Uart0Channel,
-    pub servo3: Servo3Channel,
+    pub slices: pwm::Slices,
+    pub i2c: Option<I2cBank<ServoI2c>>,
 }
 
 pub fn init() -> Resources {
@@ -55,12 +53,31 @@ pub fn init() -> Resources {
         &mut pac.RESETS, &mut watchdog
     ).ok().unwrap();
     let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
-    let delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
+    let mut slices = pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    let kept: KeptPins = crate::headers::attach(pins, &mut slices);
     let ws2812 = QWs2812::new(
-        pins.gpio18.into_function(),
+        kept.gpio18.into_function(),
         &mut pio,
         sm0, clocks.peripheral_clock.freq(), timer.count_down());
+    let i2c = if crate::i2c_bank::rows().is_empty() {
+        drop(kept.gpio20);
+        drop(kept.gpio21);
+        None
+    } else {
+        let sda = kept.gpio20.into_pull_up_input().into_function();
+        let scl = kept.gpio21.into_pull_up_input().into_function();
+        let bus = I2C::i2c0(
+            pac.I2C0,
+            sda,
+            scl,
+            400.kHz(),
+            &mut pac.RESETS,
+            clocks.system_clock.freq(),
+        );
+        Some(I2cBank::new(bus, |us| delay.delay_us(us)))
+    };
 
     let usb_bus = usb::UsbBus::new(
         pac.USBCTRL_REGS,
@@ -70,43 +87,13 @@ pub fn init() -> Resources {
         &mut pac.RESETS,
     );
 
-    // Generated
-
-    let tx = pins.gpio0.into_function::<gpio::FunctionUart>();
-    let rx = pins.gpio1.into_function::<gpio::FunctionUart>();
-    let dir = pins.gpio16.into_push_pull_output_in_state(gpio::PinState::Low);
-    let uart0 = uart::UartPeripheral::new(
-        pac.UART0,
-        (tx, rx),
-        &mut pac.RESETS,
-    );
-    let uart0 = uart0.enable(
-        uart::UartConfig::new(1_000_000.Hz(), uart::DataBits::Eight, None, uart::StopBits::One),
-        clocks.peripheral_clock.freq(),
-    ).unwrap();
-
-    let pwm_slices = pwm::Slices::new(pac.PWM, &mut pac.RESETS);
-    let mut pwm = pwm_slices.pwm1;
-    pwm.set_div_int(125);
-    pwm.set_top(20000 - 1);
-    pwm.channel_a.output_to(pins.gpio2.into_function::<gpio::FunctionPwm>());
-    pwm.enable();
-    let channel = pwm.channel_a;
-
     Resources {
         watchdog,
         usb_bus: Some(usb_bus),
         ws: Some(ws2812),
         timer,
         delay,
-
-        uart0: Rp2040UartChannel {
-            dir,
-            uart: uart0,
-            timer,
-        },
-        servo3: Rp2040PwmChannel {
-            channel
-        },
+        slices,
+        i2c,
     }
 }
