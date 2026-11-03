@@ -107,7 +107,7 @@ fn main() {
     let mut robot = get_robot();
     let mut board = match init(host.vid, host.pid) {
         Ok(board) => board,
-        Err(err) => die(usb_port::user_message(err.kind(), &host.device)),
+        Err(err) => die(usb_port::user_fix(err.kind(), &host.device)),
     };
 
     let mut last_command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
