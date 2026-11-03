@@ -349,7 +349,7 @@ mod tests {
             "E6617C93E3858429",
             &snap,
         );
-        assert!(msg.contains("expected USB serial E6617C93E3858429"), "{msg}");
+        assert!(msg.contains("serial_id=E6617C93E3858429 is not on USB"), "{msg}");
         assert!(msg.contains("OTHERBOARD"), "{msg}");
     }
 
