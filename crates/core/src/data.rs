@@ -29,6 +29,7 @@ pub struct Table<const N: usize> {
 
 
 pub const SHM_PAYLOAD_OFFSET: usize = 144;
+pub const SHM_ARRAYS: usize = 7;
 
 /// Must match `ActuatorSharedState` in `lucy_ros2_control`.
 #[repr(C)]
@@ -46,7 +47,7 @@ const _: () = assert!(size_of::<ShmHeader>() == SHM_PAYLOAD_OFFSET);
 
 impl ShmHeader {
     pub const fn size_for(max_actuators: usize) -> usize {
-        (SHM_PAYLOAD_OFFSET + 63) / 64 * 64 + 5 * max_actuators * size_of::<f64>()
+        (SHM_PAYLOAD_OFFSET + 63) / 64 * 64 + SHM_ARRAYS * max_actuators * size_of::<f64>()
     }
 }
 
@@ -99,4 +100,8 @@ impl SharedTable {
     pub fn hw_torque_enabled(&self) -> &[f64] { self.slice(3) }
     pub fn hw_positions(&self) -> &[f64] { self.slice(4) }
     pub fn hw_positions_mut(&mut self) -> &mut [f64] { self.slice_mut(4) }
+    pub fn hw_temperatures(&self) -> &[f64] { self.slice(5) }
+    pub fn hw_temperatures_mut(&mut self) -> &mut [f64] { self.slice_mut(5) }
+    pub fn hw_efforts(&self) -> &[f64] { self.slice(6) }
+    pub fn hw_efforts_mut(&mut self) -> &mut [f64] { self.slice_mut(6) }
 }

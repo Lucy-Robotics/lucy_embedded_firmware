@@ -22,7 +22,11 @@ use cortex_m_rt::entry;
 use panic_halt as _;
 
 mod ws2812;
+#[allow(dead_code)]
 mod channel;
+mod table;
+mod headers;
+mod i2c_bank;
 mod board;
 use board::init;
 mod config;
@@ -93,8 +97,10 @@ fn read_commands<B: usb_device::bus::UsbBus>(
 }
 
 fn apply_commands<const N: usize>(robot: &mut Robot<N>, commands: &JointCommands<N>) {
-    for (i, joint) in robot.joints_command.iter_mut().enumerate() {
-        joint.position = commands.positions[i];
+    for i in 0..N {
+        let position = robot.clamp_position(i, commands.positions[i]);
+        let joint = &mut robot.joints_command[i];
+        joint.position = position;
         joint.velocity = commands.velocities[i];
         joint.acceleration = commands.accelerations[i];
         joint.torque_enabled = if commands.torque_enabled[i] {
@@ -112,7 +118,11 @@ fn disable_torque<const N: usize>(robot: &mut Robot<N>) {
 }
 
 fn collect_states<const N: usize>(robot: &Robot<N>) -> JointStates<N> {
-    JointStates { positions: robot.joints_state.map(|joint| joint.position) }
+    JointStates {
+        positions: robot.joints_state.map(|joint| joint.position),
+        temperatures: robot.joints_state.map(|joint| joint.temperature),
+        efforts: robot.joints_state.map(|joint| joint.effort),
+    }
 }
 
 #[unsafe(link_section = ".boot2")]
