@@ -14,7 +14,9 @@ use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
+mod link_file;
 mod usb_port;
+use link_file::LinkFile;
 use usb_port::{UsbPort, UsbPortConfig};
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
@@ -297,7 +299,7 @@ fn main() {
     macro_rules! dispatch {
         ($($w:literal)*) => {
             match width {
-                $($w => run::<$w>(shm, port, board, serial, lock),)*
+                $($w => run::<$w>(shm, port, board, serial, lock, LinkFile::for_node(&node)),)*
                 w => panic!("no link for {w} slots (shm declares {} joints)", shm.max_actuators()),
             }
         };
@@ -311,6 +313,7 @@ fn run<const N: usize>(
     board: Board,
     serial: Option<String>,
     lock: Option<std::path::PathBuf>,
+    mut link: LinkFile,
 ) -> ! {
     let n = shm.max_actuators();
     // Joint slots both sides carry; a Mega's last link slot is its PCA9685 status.
@@ -364,6 +367,7 @@ fn run<const N: usize>(
                 match wait_reply(&mut port, &mut decoder, seq) {
                     Ok(states) => {
                         write_states(&mut shm, joints, &states);
+                        link.record();
                         last_answer = Instant::now();
                         if answering != Some(true) {
                             answering = Some(true);
