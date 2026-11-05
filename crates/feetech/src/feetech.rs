@@ -167,9 +167,16 @@ fn read_replies<S: SerialChannel, const N: usize, const P: usize>(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeetechServoConfig {
     pub id: u8,
+
     pub amplitude: f64,
     pub min_pulse: u16,
     pub max_pulse: u16,
+
+    pub torque: f64,
+    pub gear_ratio: f64,
+    pub stall_current: f64,
+    pub no_load_current: f64,
+    pub current_lsb: f64,
 }
 
 impl Default for FeetechServoConfig {
@@ -179,6 +186,12 @@ impl Default for FeetechServoConfig {
             amplitude: TAU as f64,
             min_pulse: 0,
             max_pulse: 4095,
+
+            torque: 2.94,
+            gear_ratio: 1f64,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
         }
     }
 }
@@ -370,7 +383,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
     }
 
     pub fn read_effort(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
-        const REG_LOAD: u8 = 0x3C;
+        const REG_PRESENT_CURRENT: u8 = 0x45;
 
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
@@ -388,7 +401,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         let (frame, size) = RequestBuilder::<64>::new()
             .set_id(0xFE)
             .set_instruction(SYNC_READ)
-            .set_register(REG_LOAD)
+            .set_register(REG_PRESENT_CURRENT)
             .set_sync_length(2)
             .build(ids)
             .map_err(|_| FeetechBusError::OutOfLimits)?;
@@ -400,10 +413,14 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
         read_replies(bus, self.config, |i, params: &[u8; 2]| {
+            let cfg = self.config.servos[i];
+
             let raw = u16::from_le_bytes(*params);
-            let magnitude = (raw & 0x3FF) as f64 / 1000.0;
-            let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
-            state[i].effort = sign * magnitude;
+
+            let magnitude = ((raw & 0x7FFF) as f64 * cfg.current_lsb - cfg.no_load_current).max(0.0);
+            let current = if raw & 0x8000 != 0 { -magnitude } else { magnitude };
+            let kt = cfg.torque / cfg.stall_current;
+            state[i].effort = current * kt * cfg.gear_ratio;
         })
     }
 
