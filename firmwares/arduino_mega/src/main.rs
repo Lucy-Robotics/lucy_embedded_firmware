@@ -11,7 +11,7 @@ use arduino_hal::prelude::*;
 use panic_halt as _;
 
 mod channel;
-// macro_use: board.rs uses the generated mega_servo_pins! macro.
+// board.rs uses mega_servo_pins!
 #[macro_use]
 mod config;
 mod board;
@@ -49,10 +49,7 @@ fn main() -> ! {
     let mut tick: u64 = 0;
     let mut last_command: Option<u16> = None;
 
-    // Request/response with mcu_bridge: the USART has a 2-byte FIFO, so only poll bytes
-    // while a command frame streams in, and do the slow work once it is complete.
-    // The servos are only driven after the first valid command frame; a corrupt frame is
-    // dropped at its 0x00 delimiter and the bridge times out and resends.
+    // 2-byte USART FIFO: only poll while a frame streams in
     loop {
         let now = resources.clock.tcnt1().read().bits();
         let Ok(byte) = resources.serial.read() else {
@@ -80,8 +77,7 @@ fn main() -> ! {
 }
 
 fn reply(seq: u32, resources: &mut Resources, tx: &mut [u8; FRAME_LEN]) {
-    // PWM servos report no position: NaN tells the hardware interface to keep echoing its
-    // command instead of publishing a made-up one.
+    // NaN = no position feedback
     let mut states = JointStates::<LINK>::default();
     states.positions[..JOINTS].fill(f32::NAN);
     states.positions[PCA_STATUS_SLOT] = (0x100 | resources.pca.check() as u16) as f32;
@@ -91,9 +87,7 @@ fn reply(seq: u32, resources: &mut Resources, tx: &mut [u8; FRAME_LEN]) {
     };
     for (i, &b) in tx[..len].iter().enumerate() {
         resources.serial.write_byte(b);
-        // The 16U2 USB-serial chip relays through a 128-byte ring: sent in one 1 Mbaud
-        // burst, the frame's last bytes (its CRC) overwrote bytes still queued 128 earlier.
-        // A pause per 64 bytes lets it drain; 500 us was the shortest gap clean on the bench.
+        // lets the 16U2's 128-byte ring drain
         if i % 64 == 63 {
             arduino_hal::delay_us(TX_CHUNK_GAP_US);
         }

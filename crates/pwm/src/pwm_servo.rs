@@ -75,7 +75,7 @@ impl<C: PwmChannel> PwmServoDriver<C> {
             return Ok(());
         }
 
-        // Pulse 0 = no pulses, so the servo goes limp instead of driving to position 0.
+        // 0 = limp
         bus.set_pwm(0)
             .map_err(|_| PwmServoError::CommunicationError)?;
         Ok(())

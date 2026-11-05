@@ -1,5 +1,4 @@
-//! Lists the I2C devices on D20/D21 every 2 s at 57600 baud (PCA9685s answer at 0x40..0x7F).
-//! A stuck bus shows as a "scan" line with no table after it.
+//! Lists I2C devices every 2 s at 57600 baud.
 
 #![no_std]
 #![no_main]

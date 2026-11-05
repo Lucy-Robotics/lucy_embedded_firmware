@@ -1,4 +1,3 @@
 [general]
 board = "mega2560"
-# The link is binary frames; no console.
 open-console = false

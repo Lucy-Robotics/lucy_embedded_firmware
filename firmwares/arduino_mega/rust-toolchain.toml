@@ -1,5 +1,4 @@
-# Not avr-hal's nightly-2025-04-27: its f64 soft-float is miscompiled on AVR
-# (map_range returned wrong pulses, servos jittered).
+# avr-hal's nightly miscompiles soft-float
 [toolchain]
 channel = "nightly-2026-10-19"
 components = ["rust-src"]

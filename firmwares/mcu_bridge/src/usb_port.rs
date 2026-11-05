@@ -21,8 +21,6 @@ impl UsbPortConfig {
         }
     }
 
-    /// Opens the first port with this VID/PID, or with `serial` the one whose USB serial
-    /// number matches: one bridge per board when several are plugged in.
     pub fn open(&self, serial: Option<&str>) -> Result<UsbPort, io::Error> {
         let ports = serialport::available_ports()?;
 

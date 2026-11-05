@@ -16,7 +16,6 @@ lucy-embedded-firmware-pwm = { path = "../../crates/pwm" }
 portable-atomic = { version = "1", features = ["critical-section"] }
 panic-halt = "1.0.0"
 embedded-hal = "1.0"
-# Timer5 interrupt for the Mega pin servos (same avr-device as arduino-hal).
 avr-device = { version = "0.8.1", features = ["atmega2560", "rt"] }
 
 [dependencies.arduino-hal]
@@ -24,7 +23,6 @@ git = "https://github.com/rahix/avr-hal"
 rev = "e0b0105b11a7"
 features = ["arduino-mega2560"]
 
-# Excluded from the root workspace (AVR needs its own nightly), so these profiles apply.
 [profile.dev]
 panic = "abort"
 lto = true
