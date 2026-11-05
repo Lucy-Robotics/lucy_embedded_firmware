@@ -8,17 +8,17 @@ use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusConf
 use crate::board::Uart0Channel;
 use crate::board::Resources;
 
-use core::f64::consts::{PI, TAU};
+use core::f32::consts::{PI, TAU};
 
 pub const JOINTS: usize = 6;
 
 pub const JOINTS_CONFIG: [CommandConfig; JOINTS] = [
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
-    CommandConfig { default: PI as f64, limit_min: 0.0, limit_max: TAU as f64 },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
 ];
 
 pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {

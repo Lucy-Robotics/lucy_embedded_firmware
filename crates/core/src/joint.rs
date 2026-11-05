@@ -1,8 +1,8 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CommandConfig {
-    pub default: f64,
-    pub limit_min: f64,
-    pub limit_max: f64,
+    pub default: f32,
+    pub limit_min: f32,
+    pub limit_max: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -12,9 +12,9 @@ pub enum TorqueStatus {
     Enabled,
 }
 
-impl From<f64> for TorqueStatus {
+impl From<f32> for TorqueStatus {
     #[inline]
-    fn from(value: f64) -> Self {
+    fn from(value: f32) -> Self {
         if value >= 0.5 && !value.is_nan() {
             TorqueStatus::Enabled
         } else {
@@ -25,17 +25,17 @@ impl From<f64> for TorqueStatus {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Command {
-    pub position: f64,
-    pub velocity: f64,
-    pub acceleration: f64,
+    pub position: f32,
+    pub velocity: f32,
+    pub acceleration: f32,
     pub torque_enabled: TorqueStatus,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct State {
-    pub position: f64,
-    pub temperature: f64,
-    pub effort: f64,
-    pub current: f64,
-    pub load: f64,
+    pub position: f32,
+    pub temperature: f32,
+    pub effort: f32,
+    pub current: f32,
+    pub load: f32,
 }
