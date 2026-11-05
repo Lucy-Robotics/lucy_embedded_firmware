@@ -44,6 +44,22 @@ fn frame_len_fits_worst_case() {
 }
 
 #[test]
+fn state_roundtrip() {
+    let state = Frame::new(7, Body::State(JointStates::<JOINTS> {
+        positions: [1.5; JOINTS],
+        temperatures: [42.0; JOINTS],
+        efforts: [-0.25; JOINTS],
+        currents: [0.8; JOINTS],
+        loads: [-0.3; JOINTS],
+    }));
+    let mut buf = [0u8; LEN];
+    let n = encode(&state, &mut buf).unwrap();
+
+    let mut rx = [0u8; LEN];
+    assert_eq!(feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]), Some(Ok(state)));
+}
+
+#[test]
 fn supports_more_than_32_joints() {
     let mut buf = [0u8; frame_len(40)];
     let n = encode(&command::<40>(1), &mut buf).unwrap();

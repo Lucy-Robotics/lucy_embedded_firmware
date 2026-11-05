@@ -167,9 +167,16 @@ fn read_replies<S: SerialChannel, const N: usize, const P: usize>(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeetechServoConfig {
     pub id: u8,
+
     pub amplitude: f64,
     pub min_pulse: u16,
     pub max_pulse: u16,
+
+    pub torque: f64,
+    pub gear_ratio: f64,
+    pub stall_current: f64,
+    pub no_load_current: f64,
+    pub current_lsb: f64,
 }
 
 impl Default for FeetechServoConfig {
@@ -179,6 +186,12 @@ impl Default for FeetechServoConfig {
             amplitude: TAU as f64,
             min_pulse: 0,
             max_pulse: 4095,
+
+            torque: 2.94,
+            gear_ratio: 1f64,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
         }
     }
 }
@@ -218,7 +231,7 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
         let feedback = self.read_position(bus, state);
         let extra = match tick % 10 {
             0 => self.read_temperature(bus, state),
-            1 => self.read_torque(bus, state),
+            1 => self.read_effort(bus, state),
             _ => Ok(()),
         };
         torque.and(position).and(feedback).and(extra)
@@ -369,13 +382,41 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         })
     }
 
-    pub fn read_torque(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
-        const REG_LOAD: u8 = 0x3C;
+    pub fn read_effort(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+        const REG_PRESENT_LOAD: u8 = 0x3C;
+        const REG_PRESENT_CURRENT: u8 = 0x45;
 
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
         }
 
+        let servos = &self.config.servos;
+
+        self.request_sync_read(bus, REG_PRESENT_CURRENT, 2)?;
+        let current = read_replies(bus, self.config, |i, params: &[u8; 2]| {
+            let cfg = &servos[i];
+            let raw = u16::from_le_bytes(*params);
+            let sign = if raw & 0x8000 != 0 { -1.0 } else { 1.0 };
+            let amps = (raw & 0x7FFF) as f64 * cfg.current_lsb;
+
+            let kt = cfg.torque / cfg.stall_current;
+            let torque_current = (amps - cfg.no_load_current).max(0.0);
+
+            state[i].current = sign * amps;
+            state[i].effort = sign * torque_current * kt * cfg.gear_ratio;
+        });
+
+        self.request_sync_read(bus, REG_PRESENT_LOAD, 2)?;
+        let load = read_replies(bus, self.config, |i, params: &[u8; 2]| {
+            let raw = u16::from_le_bytes(*params);
+            let sign = if raw & 0x0400 != 0 { -1.0 } else { 1.0 };
+            state[i].load = sign * (raw & 0x03FF) as f64 / 1000.0;
+        });
+
+        current.and(load)
+    }
+
+    fn request_sync_read(&self, bus: &mut S, register: u8, length: u8) -> Result<(), FeetechBusError> {
         let mut ids = [0u8; 64];
         if N > ids.len() {
             return Err(FeetechBusError::OutOfLimits);
@@ -383,28 +424,20 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         for (slot, cfg) in ids.iter_mut().zip(self.config.servos.iter()) {
             *slot = cfg.id;
         }
-        let ids = &ids[..N];
 
         let (frame, size) = RequestBuilder::<64>::new()
             .set_id(0xFE)
             .set_instruction(SYNC_READ)
-            .set_register(REG_LOAD)
-            .set_sync_length(2)
-            .build(ids)
+            .set_register(register)
+            .set_sync_length(length)
+            .build(&ids[..N])
             .map_err(|_| FeetechBusError::OutOfLimits)?;
 
         bus.clear()
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
         bus.write(&frame[..size])
-            .map_err(|_| FeetechBusError::CommunicationError)?;
-
-        read_replies(bus, self.config, |i, params: &[u8; 2]| {
-            let raw = u16::from_le_bytes(*params);
-            let magnitude = (raw & 0x3FF) as f64 / 1000.0;
-            let sign = if raw & 0x400 != 0 { -1.0 } else { 1.0 };
-            state[i].torque = sign * magnitude;
-        })
+            .map_err(|_| FeetechBusError::CommunicationError)
     }
 
     pub fn read_position(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
