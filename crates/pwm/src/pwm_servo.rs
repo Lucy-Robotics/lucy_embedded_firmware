@@ -10,7 +10,7 @@ pub enum PwmServoError {
 }
 
 pub struct PwmServoConfig {
-    pub amplitude: f64,
+    pub amplitude: f32,
     pub min_pulse: u16,
     pub max_pulse: u16,
 }
@@ -18,7 +18,7 @@ pub struct PwmServoConfig {
 impl Default for PwmServoConfig {
     fn default() -> Self {
         PwmServoConfig {
-            amplitude: PI as f64,
+            amplitude: PI,
             min_pulse: 544,
             max_pulse: 2400,
         }
@@ -58,10 +58,10 @@ impl<C: PwmChannel> PwmServoDriver<C> {
 
         let pulse = (map_range(
             command[0].position,
-            0f64,
+            0f32,
             self.config.amplitude,
-            self.config.min_pulse as f64,
-            self.config.max_pulse as f64,
+            self.config.min_pulse as f32,
+            self.config.max_pulse as f32,
         ) + 0.5) as u16;
 
         bus.set_pwm(pulse)
@@ -79,10 +79,10 @@ impl<C: PwmChannel> PwmServoDriver<C> {
 
         let pulse = (map_range(
             value,
-            0f64,
+            0f32,
             self.config.amplitude,
-            self.config.min_pulse as f64,
-            self.config.max_pulse as f64,
+            self.config.min_pulse as f32,
+            self.config.max_pulse as f32,
         ) + 0.5) as u16;
 
         bus.set_pwm(pulse)

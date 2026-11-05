@@ -7,25 +7,23 @@ use postcard::ser_flavors::{Cobs, Flavor, Slice};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-pub const PROTOCOL_VERSION: u8 = 3;
+pub const PROTOCOL_VERSION: u8 = 4;
 
 static FRAME_CRC: Crc<u16> = Crc::<u16>::new(&CRC_16_MODBUS);
 
 pub const fn frame_len(joints: usize) -> usize {
-    // version + joints (varint u32) + seq (varint u32) + body tag, then the largest body
-    // (State: 5 f64 arrays; Command is 3 f64 arrays + 1 bool array), then the CRC.
-    let raw = 1 + 5 + 5 + 1 + joints * (5 * 8) + 2;
+    let raw = 1 + 5 + 5 + 1 + joints * (5 * 4) + 2;
     cobs::max_encoding_length(raw) + 1
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct JointCommands<const N: usize> {
     #[serde(with = "BigArray")]
-    pub positions: [f64; N],
+    pub positions: [f32; N],
     #[serde(with = "BigArray")]
-    pub velocities: [f64; N],
+    pub velocities: [f32; N],
     #[serde(with = "BigArray")]
-    pub accelerations: [f64; N],
+    pub accelerations: [f32; N],
     #[serde(with = "BigArray")]
     pub torque_enabled: [bool; N],
 }
@@ -44,15 +42,15 @@ impl<const N: usize> Default for JointCommands<N> {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct JointStates<const N: usize> {
     #[serde(with = "BigArray")]
-    pub positions: [f64; N],
+    pub positions: [f32; N],
     #[serde(with = "BigArray")]
-    pub temperatures: [f64; N],
+    pub temperatures: [f32; N],
     #[serde(with = "BigArray")]
-    pub efforts: [f64; N],
+    pub efforts: [f32; N],
     #[serde(with = "BigArray")]
-    pub currents: [f64; N],
+    pub currents: [f32; N],
     #[serde(with = "BigArray")]
-    pub loads: [f64; N],
+    pub loads: [f32; N],
 }
 
 impl<const N: usize> Default for JointStates<N> {

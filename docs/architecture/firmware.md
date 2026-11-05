@@ -9,17 +9,17 @@ Detail for **`lucy_embedded_firmware`**.
 
 ## Control path
 
-Host `LucySystemHardware` exchanges **`f64` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM.
+Host `LucySystemHardware` exchanges **`f32` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
 flowchart TB
   HI["LucySystemHardware"]
-  SHM["POSIX_SHM_f64_JointTable"]
+  SHM["POSIX_SHM_f32_JointTable"]
   LinuxFW["firmwares_linux"]
   Bridge["host_to_MCU_bridge"]
   S2040["rp2040_servo2040"]
-  HI <-->|"f64 rad + seq"| SHM
+  HI <-->|"f32 rad + seq"| SHM
   SHM <-->|"SO101_host_USB_Feetech"| LinuxFW
   SHM <-->|"not_on_MCU"| Bridge
   Bridge <-->|"CDC_or_serial"| S2040
@@ -101,7 +101,7 @@ Rust names: `BusBank` = UART0 Feetech/STS; `I2cPwmBank` = PCA9685 over **I2C**. 
 | Physical board | Package | Enabled banks (from robot YAML `board_class`) |
 |----------------|---------|------------------------------------------------|
 | Pimoroni Servo2040 | `rp2040_servo2040` | `internal_servo_only` → PWM<br>`internal_servo_i2c_pwm` → PWM + I2C PCA9685<br>`bus_servo_only` → UART0 Feetech (`HAS_BUS`) |
-| Host (SO-ARM101) | `firmwares/linux` | USB serial Feetech from f64 SHM |
+| Host (SO-ARM101) | `firmwares/linux` | USB serial Feetech from f32 SHM |
 
 `board_class` is a **profile**; banks initialize only when `GENERATED_HAS_*` is true. PWM + UART0 can coexist only if PWM uses pads **outside** GPIO0–2 (builder-enforced).
 
@@ -119,7 +119,7 @@ Rust names: `BusBank` = UART0 Feetech/STS; `I2cPwmBank` = PCA9685 over **I2C**. 
 | Layer | Unit |
 |-------|------|
 | Robot YAML / HI command interfaces | **radians** |
-| Host SHM (`ActuatorSharedState` / `JointTable`) | **`f64` radians** + sequence counters |
+| Host SHM (`ActuatorSharedState` / `JointTable`) | **`f32` radians** + sequence counters |
 | Feetech / PWM drivers | rad ↔ STS ticks or PWM pulse at the driver edge |
 
 ## Related

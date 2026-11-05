@@ -168,27 +168,27 @@ fn read_replies<S: SerialChannel, const N: usize, const P: usize>(
 pub struct FeetechServoConfig {
     pub id: u8,
 
-    pub amplitude: f64,
+    pub amplitude: f32,
     pub min_pulse: u16,
     pub max_pulse: u16,
 
-    pub torque: f64,
-    pub gear_ratio: f64,
-    pub stall_current: f64,
-    pub no_load_current: f64,
-    pub current_lsb: f64,
+    pub torque: f32,
+    pub gear_ratio: f32,
+    pub stall_current: f32,
+    pub no_load_current: f32,
+    pub current_lsb: f32,
 }
 
 impl Default for FeetechServoConfig {
     fn default() -> Self {
         FeetechServoConfig {
             id: 1,
-            amplitude: TAU as f64,
+            amplitude: TAU,
             min_pulse: 0,
             max_pulse: 4095,
 
             torque: 2.94,
-            gear_ratio: 1f64,
+            gear_ratio: 1f32,
             stall_current: 2.7,
             no_load_current: 0.18,
             current_lsb: 0.0065,
@@ -260,10 +260,10 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             let velocity = cmd.velocity as u16;
             let pulse = (map_range(
                 cmd.position,
-                0 as f64,
+                0 as f32,
                 cfg.amplitude,
-                cfg.min_pulse as f64,
-                cfg.max_pulse as f64,
+                cfg.min_pulse as f32,
+                cfg.max_pulse as f32,
             ) + 0.5) as u16;
 
             let [pos_l, pos_h] = pulse.to_le_bytes();
@@ -378,7 +378,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
         read_replies(bus, self.config, |i, params: &[u8; 1]| {
-            state[i].temperature = params[0] as f64;
+            state[i].temperature = params[0] as f32;
         })
     }
 
@@ -397,7 +397,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             let cfg = &servos[i];
             let raw = u16::from_le_bytes(*params);
             let sign = if raw & 0x8000 != 0 { -1.0 } else { 1.0 };
-            let amps = (raw & 0x7FFF) as f64 * cfg.current_lsb;
+            let amps = (raw & 0x7FFF) as f32 * cfg.current_lsb;
 
             let kt = cfg.torque / cfg.stall_current;
             let torque_current = (amps - cfg.no_load_current).max(0.0);
@@ -410,7 +410,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         let load = read_replies(bus, self.config, |i, params: &[u8; 2]| {
             let raw = u16::from_le_bytes(*params);
             let sign = if raw & 0x0400 != 0 { -1.0 } else { 1.0 };
-            state[i].load = sign * (raw & 0x03FF) as f64 / 1000.0;
+            state[i].load = sign * (raw & 0x03FF) as f32 / 1000.0;
         });
 
         current.and(load)
@@ -474,10 +474,10 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         read_replies(bus, self.config, |i, params: &[u8; 2]| {
             let cfg = &servos[i];
             state[i].position = map_range(
-                u16::from_le_bytes(*params) as f64,
-                cfg.min_pulse as f64,
-                cfg.max_pulse as f64,
-                0f64,
+                u16::from_le_bytes(*params) as f32,
+                cfg.min_pulse as f32,
+                cfg.max_pulse as f32,
+                0f32,
                 cfg.amplitude,
             );
         })

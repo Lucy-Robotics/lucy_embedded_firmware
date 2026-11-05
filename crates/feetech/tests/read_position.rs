@@ -27,11 +27,12 @@ impl SerialChannel for MockBus {
     }
 }
 
-const TORQUE: f64 = 2.94;
-const GEAR_RATIO: f64 = 1.0;
-const STALL_CURRENT: f64 = 2.7;
-const NO_LOAD_CURRENT: f64 = 0.18;
-const CURRENT_LSB: f64 = 0.0065;
+const STALL_EFFORT: f32 = 2.94;
+const GEAR_RATIO: f32 = 1.0;
+const STALL_CURRENT: f32 = 2.7;
+const NO_LOAD_CURRENT: f32 = 0.18;
+const CURRENT_LSB: f32 = 0.0065;
+const EPS: f32 = 1e-5;
 
 const fn servo(id: u8) -> FeetechServoConfig {
     FeetechServoConfig {
@@ -39,7 +40,7 @@ const fn servo(id: u8) -> FeetechServoConfig {
         amplitude: 4096.0,
         min_pulse: 0,
         max_pulse: 4096,
-        torque: TORQUE,
+        torque: STALL_EFFORT,
         gear_ratio: GEAR_RATIO,
         stall_current: STALL_CURRENT,
         no_load_current: NO_LOAD_CURRENT,
@@ -52,9 +53,9 @@ static CONFIG: FeetechBusConfig<3> = FeetechBusConfig {
 };
 
 /// Expected effort (N·m) for a raw Present Current magnitude, mirroring the driver's model.
-fn expected_effort(raw: u16) -> f64 {
-    let current = (raw as f64 * CURRENT_LSB - NO_LOAD_CURRENT).max(0.0);
-    current * (TORQUE / STALL_CURRENT) * GEAR_RATIO
+fn expected_effort(raw: u16) -> f32 {
+    let current = (raw as f32 * CURRENT_LSB - NO_LOAD_CURRENT).max(0.0);
+    current * (STALL_EFFORT / STALL_CURRENT) * GEAR_RATIO
 }
 
 fn status(id: u8, pulse: u16) -> Vec<u8> {
@@ -85,12 +86,12 @@ fn read_effort_states(rx: Vec<u8>) -> (bool, [State; 3]) {
     (ok, state)
 }
 
-fn read_efforts(currents: Vec<u8>) -> (bool, Vec<f64>) {
+fn read_efforts(currents: Vec<u8>) -> (bool, Vec<f32>) {
     let (ok, state) = read_effort_states(effort_replies(currents, zero_loads()));
     (ok, state.iter().map(|s| s.effort).collect())
 }
 
-fn read(rx: Vec<u8>) -> (bool, Vec<f64>) {
+fn read(rx: Vec<u8>) -> (bool, Vec<f32>) {
     let mut bus = MockBus { rx: rx.into() };
     let mut state = [State::default(); 3];
     let ok = FeetechBusDriver::<MockBus, 3>::new(&CONFIG)
@@ -142,9 +143,9 @@ fn effort_uses_signed_present_current() {
     assert!(ok);
     assert_eq!(efforts[0], 0.0);
     // 200 * 6.5 mA = 1.3 A, minus 0.18 A no-load = 1.12 A, * (2.94 / 2.7) N·m/A
-    assert!((efforts[1] - 1.12 * 2.94 / 2.7).abs() < 1e-9);
-    assert!((efforts[1] - expected_effort(200)).abs() < 1e-9);
-    assert!((efforts[2] + expected_effort(200)).abs() < 1e-9);
+    assert!((efforts[1] - 1.12 * 2.94 / 2.7).abs() < EPS);
+    assert!((efforts[1] - expected_effort(200)).abs() < EPS);
+    assert!((efforts[2] + expected_effort(200)).abs() < EPS);
 }
 
 #[test]
@@ -156,7 +157,7 @@ fn effort_below_no_load_current_is_zero() {
     assert_eq!(efforts[0], 0.0);
     assert_eq!(efforts[1].abs(), 0.0);
     assert!(efforts[2] > 0.0);
-    assert!((efforts[2] - expected_effort(28)).abs() < 1e-9);
+    assert!((efforts[2] - expected_effort(28)).abs() < EPS);
 }
 
 #[test]
@@ -169,7 +170,7 @@ fn effort_scales_with_gear_ratio() {
     assert!(FeetechBusDriver::<MockBus, 1>::new(&GEARED)
         .read_effort(&mut bus, &mut state)
         .is_ok());
-    assert!((state[0].effort - 3.0 * expected_effort(200)).abs() < 1e-9);
+    assert!((state[0].effort - 3.0 * expected_effort(200)).abs() < EPS);
 }
 
 #[test]
@@ -181,22 +182,22 @@ fn current_is_signed_and_not_offset_by_no_load() {
     let (ok, state) = read_effort_states(rx);
     assert!(ok);
     // Below no-load: no effort, but the measured current is still reported.
-    assert!((state[0].current - 20.0 * CURRENT_LSB).abs() < 1e-9);
+    assert!((state[0].current - 20.0 * CURRENT_LSB).abs() < EPS);
     assert_eq!(state[0].effort, 0.0);
-    assert!((state[1].current - 1.3).abs() < 1e-9);
-    assert!((state[2].current + 1.3).abs() < 1e-9);
+    assert!((state[1].current - 1.3).abs() < EPS);
+    assert!((state[2].current + 1.3).abs() < EPS);
 }
 
 #[test]
-fn load_is_signed_fraction_of_max_torque() {
+fn load_is_signed_fraction_of_full_scale() {
     let rx = effort_replies(
         zero_loads(),
         [status(1, 1000), status(2, 0x0400 | 250), status(3, 0)].concat(),
     );
     let (ok, state) = read_effort_states(rx);
     assert!(ok);
-    assert!((state[0].load - 1.0).abs() < 1e-9);
-    assert!((state[1].load + 0.25).abs() < 1e-9);
+    assert!((state[0].load - 1.0).abs() < EPS);
+    assert!((state[1].load + 0.25).abs() < EPS);
     assert_eq!(state[2].load, 0.0);
 }
 
@@ -208,6 +209,6 @@ fn missing_load_reply_keeps_current_and_effort() {
     );
     let (ok, state) = read_effort_states(rx);
     assert!(!ok);
-    assert!(state.iter().all(|s| (s.effort - expected_effort(200)).abs() < 1e-9));
+    assert!(state.iter().all(|s| (s.effort - expected_effort(200)).abs() < EPS));
     assert_eq!(state.map(|s| s.load), [0.5, 0.0, 0.5]);
 }

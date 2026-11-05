@@ -9,9 +9,9 @@ fn command<const N: usize>(seq: u32) -> Frame<N> {
         *t = i % 2 == 0;
     }
     Frame::new(seq, Body::Command(JointCommands {
-        positions: [core::f64::consts::PI; N],
+        positions: [core::f32::consts::PI; N],
         velocities: [0.5; N],
-        accelerations: [f64::from_bits(0xAAAA_AAAA_0000_0000); N],
+        accelerations: [f32::from_bits(0xAAAA_0000); N],
         torque_enabled,
     }))
 }
