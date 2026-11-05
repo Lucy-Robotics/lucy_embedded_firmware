@@ -79,6 +79,8 @@ fn write_states(shm: &mut SharedTable, n: usize, states: &JointStates<JOINTS>) {
     shm.hw_positions_mut()[..n].copy_from_slice(&states.positions[..n]);
     shm.hw_temperatures_mut()[..n].copy_from_slice(&states.temperatures[..n]);
     shm.hw_efforts_mut()[..n].copy_from_slice(&states.efforts[..n]);
+    shm.hw_currents_mut()[..n].copy_from_slice(&states.currents[..n]);
+    shm.hw_loads_mut()[..n].copy_from_slice(&states.loads[..n]);
     shm.header().state_seq.fetch_add(1, Ordering::SeqCst);
 }
 

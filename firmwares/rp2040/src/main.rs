@@ -116,6 +116,8 @@ fn collect_states<const N: usize>(robot: &Robot<N>) -> JointStates<N> {
         positions: robot.joints_state.map(|joint| joint.position),
         temperatures: robot.joints_state.map(|joint| joint.temperature),
         efforts: robot.joints_state.map(|joint| joint.effort),
+        currents: robot.joints_state.map(|joint| joint.current),
+        loads: robot.joints_state.map(|joint| joint.load),
     }
 }
 

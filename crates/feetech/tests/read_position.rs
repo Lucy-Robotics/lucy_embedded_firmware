@@ -67,12 +67,26 @@ fn status(id: u8, pulse: u16) -> Vec<u8> {
     packet
 }
 
-fn read_efforts(rx: Vec<u8>) -> (bool, Vec<f64>) {
+/// Replies for `read_effort`: the Present Current sync-read, then the Present Load one.
+fn effort_replies(currents: Vec<u8>, loads: Vec<u8>) -> Vec<u8> {
+    [currents, loads].concat()
+}
+
+fn zero_loads() -> Vec<u8> {
+    [status(1, 0), status(2, 0), status(3, 0)].concat()
+}
+
+fn read_effort_states(rx: Vec<u8>) -> (bool, [State; 3]) {
     let mut bus = MockBus { rx: rx.into() };
     let mut state = [State::default(); 3];
     let ok = FeetechBusDriver::<MockBus, 3>::new(&CONFIG)
         .read_effort(&mut bus, &mut state)
         .is_ok();
+    (ok, state)
+}
+
+fn read_efforts(currents: Vec<u8>) -> (bool, Vec<f64>) {
+    let (ok, state) = read_effort_states(effort_replies(currents, zero_loads()));
     (ok, state.iter().map(|s| s.effort).collect())
 }
 
@@ -150,10 +164,50 @@ fn effort_scales_with_gear_ratio() {
     static GEARED: FeetechBusConfig<1> = FeetechBusConfig {
         servos: [FeetechServoConfig { gear_ratio: 3.0, ..servo(1) }],
     };
-    let mut bus = MockBus { rx: status(1, 200).into() };
+    let mut bus = MockBus { rx: [status(1, 200), status(1, 0)].concat().into() };
     let mut state = [State::default(); 1];
     assert!(FeetechBusDriver::<MockBus, 1>::new(&GEARED)
         .read_effort(&mut bus, &mut state)
         .is_ok());
     assert!((state[0].effort - 3.0 * expected_effort(200)).abs() < 1e-9);
+}
+
+#[test]
+fn current_is_signed_and_not_offset_by_no_load() {
+    let rx = effort_replies(
+        [status(1, 20), status(2, 200), status(3, 0x8000 | 200)].concat(),
+        zero_loads(),
+    );
+    let (ok, state) = read_effort_states(rx);
+    assert!(ok);
+    // Below no-load: no effort, but the measured current is still reported.
+    assert!((state[0].current - 20.0 * CURRENT_LSB).abs() < 1e-9);
+    assert_eq!(state[0].effort, 0.0);
+    assert!((state[1].current - 1.3).abs() < 1e-9);
+    assert!((state[2].current + 1.3).abs() < 1e-9);
+}
+
+#[test]
+fn load_is_signed_fraction_of_max_torque() {
+    let rx = effort_replies(
+        zero_loads(),
+        [status(1, 1000), status(2, 0x0400 | 250), status(3, 0)].concat(),
+    );
+    let (ok, state) = read_effort_states(rx);
+    assert!(ok);
+    assert!((state[0].load - 1.0).abs() < 1e-9);
+    assert!((state[1].load + 0.25).abs() < 1e-9);
+    assert_eq!(state[2].load, 0.0);
+}
+
+#[test]
+fn missing_load_reply_keeps_current_and_effort() {
+    let rx = effort_replies(
+        [status(1, 200), status(2, 200), status(3, 200)].concat(),
+        [status(1, 500), status(3, 500)].concat(),
+    );
+    let (ok, state) = read_effort_states(rx);
+    assert!(!ok);
+    assert!(state.iter().all(|s| (s.effort - expected_effort(200)).abs() < 1e-9));
+    assert_eq!(state.map(|s| s.load), [0.5, 0.0, 0.5]);
 }

@@ -49,6 +49,8 @@ fn state_roundtrip() {
         positions: [1.5; JOINTS],
         temperatures: [42.0; JOINTS],
         efforts: [-0.25; JOINTS],
+        currents: [0.8; JOINTS],
+        loads: [-0.3; JOINTS],
     }));
     let mut buf = [0u8; LEN];
     let n = encode(&state, &mut buf).unwrap();
