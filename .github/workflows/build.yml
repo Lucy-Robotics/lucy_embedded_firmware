@@ -28,3 +28,14 @@ jobs:
       - run: rustup target add thumbv6m-none-eabi
       - run: cargo build --release
 
+  arduino_mega:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmwares/arduino_mega
+    env:
+      LUCY_MEGA_BOARD_CONFIG: ${{ github.workspace }}/firmwares/arduino_mega/ci/config_ci.rs
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc-avr avr-libc
+      - run: cargo build --release
