@@ -1,0 +1,7 @@
+[package]
+name = "lucy-embedded-firmware-security"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lucy-embedded-firmware-core = { path = "../../crates/core" }
