@@ -1,4 +1,6 @@
-use portable_atomic::AtomicU64;
+use core::sync::atomic::Ordering;
+
+use portable_atomic::{AtomicU32, AtomicU64};
 
 pub const SHM_PAYLOAD_OFFSET: usize = 144;
 pub const SHM_ARRAYS: usize = 9;
@@ -11,14 +13,39 @@ pub struct ShmHeader {
     _pad1: [u8; 56],
     pub heartbeat: AtomicU64,
     pub max_actuators: u32,
-    _pad2: u32,
+    pub link_state: AtomicU32,
 }
 
 const _: () = assert!(size_of::<ShmHeader>() == SHM_PAYLOAD_OFFSET);
+const _: () = assert!(core::mem::offset_of!(ShmHeader, heartbeat) == 128);
+const _: () = assert!(core::mem::offset_of!(ShmHeader, max_actuators) == 136);
+const _: () = assert!(core::mem::offset_of!(ShmHeader, link_state) == 140);
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkState {
+    Disconnected = 0,
+    Connected = 1,
+}
 
 impl ShmHeader {
     pub const fn size_for(max_actuators: usize) -> usize {
         (SHM_PAYLOAD_OFFSET + 63) / 64 * 64 + SHM_ARRAYS * max_actuators * size_of::<f32>()
+    }
+
+    pub fn beat(&self) {
+        self.heartbeat.fetch_add(1, Ordering::Release);
+    }
+
+    pub fn set_link_state(&self, state: LinkState) {
+        self.link_state.store(state as u32, Ordering::Release);
+    }
+
+    pub fn link_state(&self) -> LinkState {
+        match self.link_state.load(Ordering::Acquire) {
+            1 => LinkState::Connected,
+            _ => LinkState::Disconnected,
+        }
     }
 }
 
