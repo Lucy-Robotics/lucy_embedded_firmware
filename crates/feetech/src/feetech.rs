@@ -1,4 +1,4 @@
-use crate::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 use lucy_embedded_firmware_core::joint::{*};
