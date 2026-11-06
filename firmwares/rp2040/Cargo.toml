@@ -19,7 +19,10 @@ lucy-embedded-firmware-core = { path = "../../crates/core" }
 lucy-embedded-firmware-communication = { path = "../../crates/communication" }
 
 lucy-embedded-firmware-pwm = { path = "../../crates/pwm" }
+lucy-embedded-firmware-pwm-servo = { path = "../../crates/pwm-servo" }
 lucy-embedded-firmware-feetech = { path = "../../crates/feetech" }
+lucy-embedded-firmware-serial = { path = "../../crates/serial" }
+lucy-embedded-firmware-security = { path = "../../crates/security" }
 
 portable-atomic = { version = "1", features = ["critical-section"] }
 cortex-m = "0.7.9"
