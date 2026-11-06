@@ -229,9 +229,9 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
         let torque = self.set_torque(bus, command);
         let position = self.set_position(bus, command);
         let feedback = self.read_position(bus, state);
-        let extra = match tick % 10 {
-            0 => self.read_temperature(bus, state),
-            1 => self.read_effort(bus, state),
+        let extra = match (tick % 2, tick % 10) {
+            (1, _) => self.read_effort(bus, state),
+            (_, 0) => self.read_temperature(bus, state),
             _ => Ok(()),
         };
         torque.and(position).and(feedback).and(extra)
