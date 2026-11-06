@@ -1,100 +1,34 @@
-use std::fs::File;
+use std::io::Write;
 use std::time::Duration;
 
-use memmap2::MmapMut;
-
-use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
-use libc;
-use std::ffi::CString;
-use std::io::Write;
-use std::os::fd::FromRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use lucy_embedded_firmware_core::data::LinkState;
+use lucy_embedded_firmware_host::shm::{node_name, Shm};
+use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
 
 mod resources;
 
 mod board;
 use board::init;
 
-mod usb_port;
 mod config;
 use config::{get_robot, robot_release, robot_tick};
 
-const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
-const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
-
-static STOP: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn request_stop(_: libc::c_int) {
-    STOP.store(true, Ordering::SeqCst);
-}
-
-fn node_name() -> String {
-    std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("LUCY_NODE_NAME").ok())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "lucy".to_string())
-}
-
-fn open_shm(name: &str, min_len: usize) -> File {
-    let c_name = CString::new(name).expect("shm name contains a NUL byte");
-    let deadline = std::time::Instant::now() + SHM_OPEN_TIMEOUT;
-
-    loop {
-        let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
-        if fd != -1 {
-            let file = unsafe { File::from_raw_fd(fd) };
-            let len = file
-                .metadata()
-                .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
-                .len() as usize;
-            if len < min_len {
-                panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
-            }
-            return file;
-        }
-        let err = std::io::Error::last_os_error();
-        if std::time::Instant::now() >= deadline {
-            panic!(
-                "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {err}. \
-                 Is the ROS 2 stack running with node_name={}?",
-                name.trim_start_matches('/').split('.').next().unwrap_or(name),
-            );
-        }
-        std::thread::sleep(SHM_OPEN_RETRY);
-    }
-}
-
 fn main() {
-    let node = node_name();
-    println!("Attaching to Lucy shared memory for node_name={node}");
-
-    let shm_file = open_shm(
-        &format!("/{node}"),
-        size_of::<ShmHeader>(),
-    );
-
-    let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
-        .unwrap_or_else(|e| panic!("invalid shm layout: {e}"));
+    let mut ass = Shm::attach(&node_name());
 
     let mut robot = get_robot();
     let mut board = init();
 
-    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
-        let prev = unsafe { libc::signal(sig, request_stop as *const () as libc::sighandler_t) };
-        if prev == libc::SIG_IGN {
-            unsafe { libc::signal(sig, libc::SIG_IGN) };
-        }
-    }
+    install_stop_handler();
 
     let mut last_command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
     let mut tick_count: u64 = 0;
+    let mut faulted = false;
 
-    while !STOP.load(Ordering::SeqCst) {
+    while !stop_requested() {
         next_tick += period;
 
         let command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
@@ -105,11 +39,19 @@ fn main() {
 
         robot_tick(tick_count, &mut robot, &mut board);
 
+        ass.header().set_link_state(if board.connected() { LinkState::Connected } else { LinkState::Disconnected });
+        ass.header().beat();
+
+        if robot.faulted() != faulted {
+            faulted = robot.faulted();
+            let _ = writeln!(std::io::stderr(), "Warning: protection {}", if faulted { "tripped, torque held off" } else { "released" });
+        }
+
         ass.header().state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         robot.sync_read_shm(&mut ass);
         ass.header().state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
-        if STOP.load(Ordering::SeqCst) {
+        if stop_requested() {
             break;
         }
 
@@ -124,4 +66,5 @@ fn main() {
     }
 
     robot_release(&mut board);
+    ass.header().set_link_state(LinkState::Disconnected);
 }
