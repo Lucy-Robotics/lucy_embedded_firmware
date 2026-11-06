@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use lucy_embedded_firmware_core::joint::State;
 use lucy_embedded_firmware_feetech::feetech::{FeetechBusConfig, FeetechBusDriver, FeetechServoConfig};
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 struct MockBus {
     rx: VecDeque<u8>,

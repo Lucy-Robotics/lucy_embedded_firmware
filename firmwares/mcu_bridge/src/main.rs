@@ -1,56 +1,21 @@
-use std::fs::File;
-use std::io::Read;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use memmap2::MmapMut;
-
-use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
+use lucy_embedded_firmware_core::data::{LinkState, SharedTable};
+use lucy_embedded_firmware_serial::SerialChannel;
 use lucy_embedded_firmware_communication::{
     encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
 };
-use libc;
-use std::ffi::CString;
-use std::os::fd::FromRawFd;
-
-mod usb_port;
-use usb_port::{UsbPort, UsbPortConfig};
+use lucy_embedded_firmware_host::shm::{node_name, Shm};
+use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
+use lucy_embedded_firmware_host::usb_port::{ClearBuffer, UsbPort, UsbPortConfig};
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
 const JOINTS: usize = 6;
 const FRAME_LEN: usize = frame_len(JOINTS);
 
 const REPLY_TIMEOUT: Duration = Duration::from_millis(40);
-
-fn node_name() -> String {
-    std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("LUCY_NODE_NAME").ok())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "lucy".to_string())
-}
-
-fn open_shm(name: &str, min_len: usize) -> File {
-    let c_name = CString::new(name).expect("shm name contains a NUL byte");
-    let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
-    if fd == -1 {
-        panic!(
-            "shm_open(\"{name}\") failed: {}. Is the ROS 2 stack running with node_name={}?",
-            std::io::Error::last_os_error(),
-            name.trim_start_matches('/').split('.').next().unwrap_or(name),
-        );
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let len = file
-        .metadata()
-        .unwrap_or_else(|e| panic!("stat on shm object \"{name}\" failed: {e}"))
-        .len() as usize;
-    if len < min_len {
-        panic!("shm object \"{name}\" is {len} bytes, expected at least {min_len}");
-    }
-    file
-}
+const LINK_TIMEOUT: Duration = Duration::from_millis(200);
 
 fn read_commands(shm: &SharedTable, n: usize) -> JointCommands<JOINTS> {
     loop {
@@ -92,13 +57,10 @@ fn wait_reply(
     let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut buf = [0u8; 256];
     while Instant::now() < deadline {
-        let count = match port.port.read(&mut buf) {
+        let count = match port.read_available(&mut buf) {
             Ok(count) => count,
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
-            Err(e) => {
-                eprintln!("Serial read failed: {e}");
-                return None;
-            }
+            Err(_) => return None,
         };
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
@@ -115,17 +77,7 @@ fn wait_reply(
 }
 
 fn main() {
-    let node = node_name();
-    println!("Attaching to Lucy shared memory for node_name={node}");
-
-    let shm_file = open_shm(
-        &format!("/{node}"),
-        size_of::<ShmHeader>(),
-    );
-
-    let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
-        .unwrap_or_else(|e| panic!("invalid shm layout: {e}"));
+    let mut ass = Shm::attach(&node_name());
     let n = JOINTS.min(ass.max_actuators());
     if ass.max_actuators() != JOINTS {
         eprintln!(
@@ -134,9 +86,9 @@ fn main() {
         );
     }
 
-    let usb_config = UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000);
-    let mut port = usb_config.open().expect("Failed to initialize USB Port");
-    port.clear().ok();
+    let mut port = UsbPort::new(UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000).with_clear_buffer(ClearBuffer::All));
+
+    install_stop_handler();
 
     let mut rx_buf = [0u8; FRAME_LEN];
     let mut decoder = FrameDecoder::<JOINTS>::new(&mut rx_buf);
@@ -145,8 +97,9 @@ fn main() {
 
     let period = Duration::from_millis(50);
     let mut next_tick = Instant::now();
+    let mut last_reply: Option<Instant> = None;
 
-    loop {
+    while !stop_requested() {
         next_tick += period;
         seq = seq.wrapping_add(1);
 
@@ -155,13 +108,20 @@ fn main() {
 
         match port.write(&frame[..len]) {
             Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
-                Some(states) => write_states(&mut ass, n, &states),
-                None => eprintln!("No state reply from rp2040 for seq={seq}, dropping tick"),
+                Some(states) => {
+                    write_states(&mut ass, n, &states);
+                    last_reply = Some(Instant::now());
+                }
+                None if port.connected() => eprintln!("No state reply from rp2040 for seq={seq}, dropping tick"),
+                None => {}
             },
-            Err(e) => {
-                eprintln!("Failed to write commands over serial port: {e}, dropping tick");
-            }
+            Err(e) if port.connected() => eprintln!("Failed to write commands over serial port: {e}, dropping tick"),
+            Err(_) => {}
         }
+
+        let linked = port.connected() && last_reply.is_some_and(|t| t.elapsed() < LINK_TIMEOUT);
+        ass.header().set_link_state(if linked { LinkState::Connected } else { LinkState::Disconnected });
+        ass.header().beat();
 
         let now = Instant::now();
         if now < next_tick {
@@ -171,4 +131,6 @@ fn main() {
             next_tick = now;
         }
     }
+
+    ass.header().set_link_state(LinkState::Disconnected);
 }
