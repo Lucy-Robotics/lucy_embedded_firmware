@@ -2,7 +2,8 @@ use lucy_embedded_firmware_core::joint::{*};
 use lucy_embedded_firmware_core::robot::Robot;
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 
-use lucy_embedded_firmware_pwm::pwm_servo::{PwmServoConfig, PwmServoDriver};
+use lucy_embedded_firmware_pwm_servo::pwm_servo::{PwmServoConfig, PwmServoDriver};
+use lucy_embedded_firmware_security::limits::PositionLimitGuard;
 
 use crate::board::Resources;
 use crate::servo_pins::PinServo;
@@ -19,6 +20,8 @@ pub const JOINTS: usize = JOINTS_CONFIG.len();
 pub const PCA_STATUS_SLOT: usize = JOINTS;
 pub const LINK: usize = JOINTS + 1;
 const PCA_OUTPUTS: usize = 16 * PCA_ADDRESSES.len();
+
+pub type LucyRobot = Robot<JOINTS, PositionLimitGuard<JOINTS>>;
 
 // Arduino Servo defaults
 pub const PWM_0: PwmServoConfig = PwmServoConfig {
@@ -50,28 +53,26 @@ const _: () = {
     }
 };
 
-pub fn get_robot() -> Robot<JOINTS> {
-    Robot {
-        joints_config: &JOINTS_CONFIG,
-        joints_command: [Command::default(); JOINTS],
-        joints_state: [State::default(); JOINTS],
-    }
+pub fn get_robot() -> LucyRobot {
+    Robot::new(&JOINTS_CONFIG, PositionLimitGuard::new(&JOINTS_CONFIG))
 }
 
 pub fn robot_tick(
     tick: u64,
-    robot: &mut Robot<JOINTS>,
+    robot: &mut LucyRobot,
     resources: &mut Resources) {
 
-    for &(i, output) in DRIVEN.iter() {
-        let command = &mut robot.joints_command[i..i + 1];
-        let state = &mut robot.joints_state[i..i + 1];
-        if (output as usize) < PCA_OUTPUTS {
-            let mut channel = resources.pca.output(output);
-            PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
-        } else {
-            let mut channel = PinServo { index: output as usize - PCA_OUTPUTS };
-            PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
+    robot.tick(|commands, states| {
+        for &(i, output) in DRIVEN.iter() {
+            let command = &mut commands[i..i + 1];
+            let state = &mut states[i..i + 1];
+            if (output as usize) < PCA_OUTPUTS {
+                let mut channel = resources.pca.output(output);
+                PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
+            } else {
+                let mut channel = PinServo { index: output as usize - PCA_OUTPUTS };
+                PwmServoDriver::new(&PWM_0).update(tick, &mut channel, command, state).ok();
+            }
         }
-    }
+    });
 }

@@ -12,6 +12,8 @@ edition = "2024"
 lucy-embedded-firmware-core = { path = "../../crates/core" }
 lucy-embedded-firmware-communication = { path = "../../crates/communication" }
 lucy-embedded-firmware-pwm = { path = "../../crates/pwm" }
+lucy-embedded-firmware-pwm-servo = { path = "../../crates/pwm-servo" }
+lucy-embedded-firmware-security = { path = "../../crates/security" }
 
 portable-atomic = { version = "1", features = ["critical-section"] }
 panic-halt = "1.0.0"

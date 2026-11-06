@@ -26,7 +26,8 @@ fn main() {
         println!("cargo:rustc-env=DEVICE_SERIAL_NUMBER={serial}");
     }
 
-    if let Ok(contents) = std::fs::read_to_string(&config_path)
+    if config_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&config_path)
         && contents.contains("actuators:")
         && contents.contains("virtual_pin:")
     {

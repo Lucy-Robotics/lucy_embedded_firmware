@@ -1,6 +1,6 @@
 use super::driver::{FeetechBusDriver, FeetechBusError};
 use super::protocol::{RequestBuilder, SYNC_WRITE};
-use crate::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 use lucy_embedded_firmware_core::joint::*;
 use lucy_embedded_firmware_core::utils::map_range;

@@ -1,5 +1,5 @@
 use embedded_hal::i2c::I2c;
-use lucy_embedded_firmware_pwm::pwm_channel::PwmChannel;
+use lucy_embedded_firmware_pwm::PwmChannel;
 
 pub enum PwmError {
     I2c,

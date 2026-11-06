@@ -1,5 +1,5 @@
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use lucy_embedded_firmware_pwm::pwm_channel::PwmChannel;
+use lucy_embedded_firmware_pwm::PwmChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 use embedded_hal::{digital::OutputPin, pwm::SetDutyCycle};
 

@@ -4,7 +4,7 @@ use arduino_hal::hal::port::Dynamic;
 use arduino_hal::port::{mode::Output, Pin};
 use avr_device::interrupt::Mutex;
 
-use lucy_embedded_firmware_pwm::pwm_channel::PwmChannel;
+use lucy_embedded_firmware_pwm::PwmChannel;
 
 use crate::channel::PwmError;
 use crate::config::MEGA_PINS;

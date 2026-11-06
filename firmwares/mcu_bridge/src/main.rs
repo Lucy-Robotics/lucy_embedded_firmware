@@ -1,30 +1,38 @@
-use std::fs::File;
-use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-
-use memmap2::MmapMut;
 
 use lucy_embedded_firmware_communication::{
     Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
-use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use std::ffi::CString;
-use std::os::fd::FromRawFd;
-
-mod usb_port;
-use usb_port::{UsbPort, UsbPortConfig};
+use lucy_embedded_firmware_core::data::{LinkState, SharedTable};
+use lucy_embedded_firmware_host::shm::{Shm, node_name};
+use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
+use lucy_embedded_firmware_host::usb_port::{ClearBuffer, UsbPort, UsbPortConfig};
+use lucy_embedded_firmware_serial::SerialChannel;
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
 const RP2040_JOINTS: usize = 6;
 
 const REPLY_TIMEOUT: Duration = Duration::from_millis(60);
+const LINK_TIMEOUT: Duration = Duration::from_millis(200);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Board {
     Rp2040,
     Mega,
+}
+
+impl Board {
+    fn port_config(self, serial: Option<&str>) -> UsbPortConfig {
+        let (vid, pid) = match self {
+            Board::Rp2040 => (0x2e8a, 0x0003),
+            Board::Mega => (0x2341, 0x0042),
+        };
+        UsbPortConfig::new(vid, pid, 1_000_000)
+            .with_clear_buffer(ClearBuffer::All)
+            .with_serial_number(serial.map(str::to_string))
+    }
 }
 
 enum ReplyError {
@@ -89,7 +97,7 @@ fn wait_reply<const N: usize>(
     let mut buf = [0u8; 256];
     let mut corrupt = None;
     while Instant::now() < deadline {
-        let count = match port.port.read(&mut buf) {
+        let count = match port.read_available(&mut buf) {
             Ok(count) => count,
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
             Err(e) => return Err(ReplyError::Io(e)),
@@ -107,14 +115,6 @@ fn wait_reply<const N: usize>(
         }
     }
     Err(corrupt.map_or(ReplyError::Timeout, ReplyError::Corrupt))
-}
-
-fn node_name() -> String {
-    std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("LUCY_NODE_NAME").ok())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "lucy".to_string())
 }
 
 fn usb_serial() -> Option<String> {
@@ -163,93 +163,56 @@ const RETRY: Duration = Duration::from_secs(1);
 
 const BOOTLOADER_TIMEOUT: Duration = Duration::from_millis(1500);
 
+const MEGA_RESET: Duration = Duration::from_secs(2);
+
 /// Held by flashers while avrdude owns the port
-fn flash_lock(serial: Option<&str>) -> Option<std::path::PathBuf> {
-    serial.map(|s| std::path::PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
+fn flash_lock(serial: Option<&str>) -> Option<PathBuf> {
+    serial.map(|s| PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
 }
 
-fn try_open_shm(name: &str, min_len: usize) -> Result<File, String> {
-    let c_name = CString::new(name).expect("shm name contains a NUL byte");
-    let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
-    if fd == -1 {
-        return Err(format!("shm_open: {}", std::io::Error::last_os_error()));
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let len = file.metadata().map_err(|e| format!("stat: {e}"))?.len() as usize;
-    if len < min_len {
-        return Err(format!("{len} bytes, expected at least {min_len}"));
-    }
-    Ok(file)
-}
-
-fn attach_shm(name: &str, min_len: usize) -> File {
-    let mut waiting = false;
-    loop {
-        match try_open_shm(name, min_len) {
-            Ok(file) => return file,
-            Err(e) if !waiting => {
-                println!("Waiting for the control stack's shared memory {name} ({e})");
-                waiting = true;
-            }
-            Err(_) => {}
-        }
-        std::thread::sleep(RETRY);
-    }
-}
-
-fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
-    UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
-        .open(serial)
-        .and_then(|mut port| port.clear().map(|()| (port, Board::Rp2040)))
-        .or_else(|e| {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                return Err(e);
-            }
-            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000).open(serial)?;
-            // Opening resets the Mega: wait out its bootloader
-            std::thread::sleep(Duration::from_secs(2));
-            port.clear()?;
-            Ok((port, Board::Mega))
-        })
-}
-
-fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Board) {
+fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)> {
     let label = serial.unwrap_or("(first found)");
-    let mut said: Option<String> = None;
-    loop {
+    let mut said = None;
+    while !stop_requested() {
         let state = if lock.is_some_and(|l| l.exists()) {
-            "is being flashed".to_string()
+            "is being flashed"
         } else {
-            match open_board(serial) {
-                Ok(board) => {
-                    println!("Board {label} connected");
-                    return board;
+            match [Board::Rp2040, Board::Mega]
+                .into_iter()
+                .find(|b| b.port_config(serial).present())
+            {
+                Some(board) => {
+                    println!("Board {label} found");
+                    let mut port = UsbPort::new(board.port_config(serial));
+                    // Opening resets the Mega: wait out its bootloader
+                    if board == Board::Mega && port.connected() {
+                        std::thread::sleep(MEGA_RESET);
+                        let _ = port.clear();
+                    }
+                    return Some((port, board));
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "not found".to_string(),
-                Err(e) => format!("cannot be opened ({e})"),
+                None => "not found",
             }
         };
-        if said.as_deref() != Some(state.as_str()) {
+        if said != Some(state) {
             println!("Board {label} {state}, waiting");
             said = Some(state);
         }
         std::thread::sleep(RETRY);
     }
+    None
 }
 
 fn main() {
-    let node = node_name();
-    println!("Attaching to Lucy shared memory for node_name={node}");
+    let shm = Shm::attach(&node_name());
 
-    let shm_file = attach_shm(&format!("/{node}"), size_of::<ShmHeader>());
-
-    let mut table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
-    let shm = unsafe { SharedTable::from_raw(table_map.as_mut_ptr(), table_map.len()) }
-        .unwrap_or_else(|e| panic!("invalid shm layout: {e}"));
+    install_stop_handler();
 
     let serial = usb_serial();
     let lock = flash_lock(serial.as_deref());
-    let (port, board) = connect(serial.as_deref(), lock.as_deref());
+    let Some((port, board)) = connect(serial.as_deref(), lock.as_deref()) else {
+        return;
+    };
 
     // shortcut: assumes virtual_pins are 0..joints-1
     let width = match board {
@@ -268,12 +231,12 @@ fn main() {
 }
 
 fn run<const N: usize>(
-    mut shm: SharedTable,
+    mut shm: Shm,
     mut port: UsbPort,
     board: Board,
     serial: Option<String>,
-    lock: Option<std::path::PathBuf>,
-) -> ! {
+    lock: Option<PathBuf>,
+) {
     let n = shm.max_actuators();
     let joints = if board == Board::Mega {
         N - 1
@@ -294,27 +257,26 @@ fn run<const N: usize>(
     // 20 Hz looks stepped
     let period = Duration::from_millis(25);
     let mut next_tick = Instant::now();
+    let mut last_reply: Option<Instant> = None;
 
     let mut problems = ProblemLog::new();
-    let mut failed_writes = 0u32;
     let pcas = parse_pca_addresses(&std::env::args().nth(3).unwrap_or_default());
     let mut pcas_missing = None;
     let label = serial.clone().unwrap_or_default();
     let mut last_answer = Instant::now();
     let mut answering = None;
-    loop {
-        let flashing = lock.as_deref().is_some_and(|l| l.exists());
-        if flashing || failed_writes >= 3 {
-            if flashing {
-                println!("Board {label} is being flashed: releasing the port");
-            } else {
-                println!("Board {label} stopped answering: reconnecting");
-            }
+    while !stop_requested() {
+        if lock.as_deref().is_some_and(|l| l.exists()) {
+            println!("Board {label} is being flashed: releasing the port");
             drop(port);
-            port = connect(serial.as_deref(), lock.as_deref()).0;
+            shm.header().set_link_state(LinkState::Disconnected);
+            port = match connect(serial.as_deref(), lock.as_deref()) {
+                Some((port, _)) => port,
+                None => break,
+            };
             decoder.reset();
-            failed_writes = 0;
             answering = None;
+            last_reply = None;
             next_tick = Instant::now();
             last_answer = next_tick;
         }
@@ -326,43 +288,48 @@ fn run<const N: usize>(
             .expect("frame buffer is frame_len(N)");
 
         match port.write(&frame[..len]) {
-            Ok(()) => {
-                failed_writes = 0;
-                match wait_reply(&mut port, &mut decoder, seq) {
-                    Ok(states) => {
-                        write_states(&mut shm, joints, &states);
-                        last_answer = Instant::now();
-                        if answering != Some(true) {
-                            answering = Some(true);
-                            println!("Board {label} answering");
-                        }
-                        if board == Board::Mega {
-                            for line in
-                                pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing)
-                            {
-                                println!("{line}");
-                            }
-                        }
+            Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
+                Ok(states) => {
+                    write_states(&mut shm, joints, &states);
+                    last_answer = Instant::now();
+                    last_reply = Some(last_answer);
+                    if answering != Some(true) {
+                        answering = Some(true);
+                        println!("Board {label} answering");
                     }
-                    Err(e) => {
-                        let backlog = port.port.bytes_to_read();
-                        let kind = match e {
-                            ReplyError::Corrupt(_) => Problem::Crc,
-                            ReplyError::Timeout | ReplyError::Io(_) => Problem::ReadIo,
-                        };
-                        problems.record(kind, || format!(
-                            "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
-                        ));
+                    if board == Board::Mega {
+                        for line in pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing) {
+                            println!("{line}");
+                        }
                     }
                 }
-            }
-            Err(e) => {
+                Err(e) if port.connected() => {
+                    let backlog = port.bytes_to_read();
+                    let kind = match e {
+                        ReplyError::Corrupt(_) => Problem::Crc,
+                        ReplyError::Timeout | ReplyError::Io(_) => Problem::ReadIo,
+                    };
+                    problems.record(kind, || format!(
+                        "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
+                    ));
+                }
+                Err(_) => {}
+            },
+            Err(e) if port.connected() => {
                 problems.record(Problem::Write, || {
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
-                failed_writes += 1;
             }
+            Err(_) => {}
         }
+
+        let linked = port.connected() && last_reply.is_some_and(|t| t.elapsed() < LINK_TIMEOUT);
+        shm.header().set_link_state(if linked {
+            LinkState::Connected
+        } else {
+            LinkState::Disconnected
+        });
+        shm.header().beat();
 
         let now = Instant::now();
         if answering != Some(false) && now - last_answer > SILENT_AFTER {
@@ -387,6 +354,8 @@ fn run<const N: usize>(
         }
         problems.flush();
     }
+
+    shm.header().set_link_state(LinkState::Disconnected);
 }
 
 #[derive(Clone, Copy)]
@@ -456,6 +425,7 @@ impl ProblemLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lucy_embedded_firmware_core::data::ShmHeader;
 
     #[test]
     fn shm_round_trip_forwards_only_the_linked_joints() {

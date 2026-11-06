@@ -17,17 +17,15 @@ mod config;
 mod board;
 use board::{init, Resources};
 mod servo_pins;
-use config::{get_robot, robot_tick, JOINTS, LINK, PCA_STATUS_SLOT};
+use config::{get_robot, robot_tick, LucyRobot, JOINTS, LINK, PCA_STATUS_SLOT};
 
 const FRAME_LEN: usize = frame_len(LINK);
 const TX_CHUNK_GAP_US: u32 = 500;
 const COMMAND_TIMEOUT_TICKS: u16 = (200_000 / 64) as u16;
 
-fn apply_commands(robot: &mut lucy_embedded_firmware_core::robot::Robot<JOINTS>, commands: &JointCommands<LINK>) {
-    for i in 0..JOINTS {
-        let position = robot.clamp_position(i, commands.positions[i]);
-        let joint = &mut robot.joints_command[i];
-        joint.position = position;
+fn apply_commands(robot: &mut LucyRobot, commands: &JointCommands<LINK>) {
+    for (i, joint) in robot.commands_mut().iter_mut().enumerate() {
+        joint.position = commands.positions[i];
         joint.velocity = commands.velocities[i];
         joint.acceleration = commands.accelerations[i];
         joint.torque_enabled = if commands.torque_enabled[i] {
@@ -55,9 +53,7 @@ fn main() -> ! {
         let now = resources.clock.tcnt1().read().bits();
         // checked on every pass so a stream of bad bytes cannot hold torque on
         if last_command.is_some_and(|t| now.wrapping_sub(t) > COMMAND_TIMEOUT_TICKS) {
-            for joint in robot.joints_command.iter_mut() {
-                joint.torque_enabled = TorqueStatus::Disabled;
-            }
+            robot.disable_torque();
             robot_tick(tick, &mut robot, &mut resources);
             last_command = None;
         }

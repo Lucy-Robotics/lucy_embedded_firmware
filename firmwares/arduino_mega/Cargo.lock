@@ -475,6 +475,8 @@ dependencies = [
  "lucy-embedded-firmware-communication",
  "lucy-embedded-firmware-core",
  "lucy-embedded-firmware-pwm",
+ "lucy-embedded-firmware-pwm-servo",
+ "lucy-embedded-firmware-security",
  "panic-halt",
  "portable-atomic",
 ]
@@ -501,8 +503,20 @@ dependencies = [
 [[package]]
 name = "lucy-embedded-firmware-pwm"
 version = "0.1.0"
+
+[[package]]
+name = "lucy-embedded-firmware-pwm-servo"
+version = "0.1.0"
 dependencies = [
  "crc",
+ "lucy-embedded-firmware-core",
+ "lucy-embedded-firmware-pwm",
+]
+
+[[package]]
+name = "lucy-embedded-firmware-security"
+version = "0.1.0"
+dependencies = [
  "lucy-embedded-firmware-core",
 ]
 
