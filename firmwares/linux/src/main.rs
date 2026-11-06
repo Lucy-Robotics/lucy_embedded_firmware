@@ -15,11 +15,14 @@ mod board;
 use board::init;
 
 mod config;
+mod maintenance;
 mod usb_port;
-use config::{get_robot, robot_release, robot_tick};
+use config::{Telemetry, get_robot, handle_maintenance, robot_release, robot_tick};
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
+/// Control ticks between looking for plugged or unplugged adapters (1 s).
+const ADAPTER_REFRESH_TICKS: u64 = 20;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -79,6 +82,21 @@ fn main() {
 
     let mut robot = get_robot();
     let mut board = init();
+    let mut telemetry = Telemetry::default();
+
+    // Control must keep working without it: only calibration needs this socket.
+    let socket = maintenance::socket_path(&node);
+    let mut maintenance_server = match maintenance::Server::bind(&socket) {
+        Ok(server) => Some(server),
+        Err(e) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "Warning: no maintenance socket at {}: {e}",
+                socket.display()
+            );
+            None
+        }
+    };
 
     for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
         let prev = unsafe { libc::signal(sig, request_stop as *const () as libc::sighandler_t) };
@@ -108,7 +126,11 @@ fn main() {
             last_command_seq = command_seq;
         }
 
-        robot_tick(tick_count, &mut robot, &mut board);
+        if tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
+            board.refresh();
+        }
+
+        robot_tick(tick_count, &mut robot, &mut board, &mut telemetry);
 
         ass.header()
             .state_seq
@@ -117,6 +139,10 @@ fn main() {
         ass.header()
             .state_seq
             .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+        if let Some(server) = maintenance_server.as_mut() {
+            server.poll(|request| handle_maintenance(request, &robot, &mut board, &telemetry));
+        }
 
         if STOP.load(Ordering::SeqCst) {
             break;
