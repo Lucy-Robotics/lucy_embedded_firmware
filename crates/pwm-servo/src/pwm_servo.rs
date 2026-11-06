@@ -1,4 +1,4 @@
-use crate::pwm_channel::PwmChannel;
+use lucy_embedded_firmware_pwm::PwmChannel;
 use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
 use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
 use lucy_embedded_firmware_core::utils::map_range;
