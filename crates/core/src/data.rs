@@ -30,9 +30,7 @@ pub struct SharedTable {
 impl SharedTable {
     /// # Safety
     ///
-    /// `base` must be valid for reads and writes for `len` bytes, aligned
-    /// for `ShmHeader`, and must stay valid and exclusively accessed
-    /// through the returned `SharedTable` for as long as it exists.
+    /// `base` must stay valid and exclusively ours for `len` bytes.
     pub unsafe fn from_raw(base: *mut u8, len: usize) -> Result<Self, &'static str> {
         if len < size_of::<ShmHeader>() {
             return Err("shm smaller than header");
