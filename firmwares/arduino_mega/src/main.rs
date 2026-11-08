@@ -51,6 +51,7 @@ fn main() -> ! {
 
     // 2-byte USART FIFO: only poll while a frame streams in
     loop {
+        resources.watchdog.feed();
         let now = resources.clock.tcnt1().read().bits();
         let Ok(byte) = resources.serial.read() else {
             if last_command.is_some_and(|t| now.wrapping_sub(t) > COMMAND_TIMEOUT_TICKS) {

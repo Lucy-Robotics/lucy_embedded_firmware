@@ -1,4 +1,5 @@
 use arduino_hal::hal::port::{PE0, PE1};
+use arduino_hal::hal::wdt;
 use arduino_hal::port::{mode, Pin};
 
 use crate::channel::Pca9685Bank;
@@ -15,11 +16,17 @@ pub struct Resources {
     pub pca: Pca9685Bank<arduino_hal::I2c>,
 
     pub clock: arduino_hal::pac::TC1,
+
+    pub watchdog: wdt::Wdt,
 }
 
 pub fn init() -> Resources {
     let dp = arduino_hal::Peripherals::take().unwrap();
     let pins = arduino_hal::pins!(dp);
+
+    // a wedged I2C bus never returns: reset, PCA init turns the outputs off
+    let mut watchdog = wdt::Wdt::new(dp.WDT, &dp.CPU.mcusr());
+    watchdog.start(wdt::Timeout::Ms500).unwrap();
 
     let serial = arduino_hal::default_serial!(dp, pins, 1_000_000);
 
@@ -45,5 +52,5 @@ pub fn init() -> Resources {
 
     dp.TC1.tccr1b().write(|w| w.cs1().prescale_1024());
 
-    Resources { serial, pca, clock: dp.TC1 }
+    Resources { serial, pca, clock: dp.TC1, watchdog }
 }
