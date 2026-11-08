@@ -15,12 +15,8 @@ jobs:
       - run: rustup component add rustfmt clippy
       - run: rustup target add thumbv6m-none-eabi
       - run: cargo fmt --all -- --check
-      # Not yet -D warnings: this job's first run is what confirms whether
-      # the workspace is clippy-clean under CI's own toolchain (no linker
-      # was available to verify locally). Tighten to -D warnings once a run
-      # on dev is seen green.
-      - run: cargo clippy --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder --all-targets
-      - run: cargo clippy --manifest-path firmwares/rp2040/Cargo.toml --release
+      - run: cargo clippy --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path firmwares/rp2040/Cargo.toml --release -- -D warnings
 
   host:
     strategy:
