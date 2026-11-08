@@ -18,7 +18,7 @@ const _: () = assert!(size_of::<ShmHeader>() == SHM_PAYLOAD_OFFSET);
 
 impl ShmHeader {
     pub const fn size_for(max_actuators: usize) -> usize {
-        (SHM_PAYLOAD_OFFSET + 63) / 64 * 64 + SHM_ARRAYS * max_actuators * size_of::<f32>()
+        SHM_PAYLOAD_OFFSET.div_ceil(64) * 64 + SHM_ARRAYS * max_actuators * size_of::<f32>()
     }
 }
 
@@ -28,6 +28,11 @@ pub struct SharedTable {
 }
 
 impl SharedTable {
+    /// # Safety
+    ///
+    /// `base` must be valid for reads and writes for `len` bytes, aligned
+    /// for `ShmHeader`, and must stay valid and exclusively accessed
+    /// through the returned `SharedTable` for as long as it exists.
     pub unsafe fn from_raw(base: *mut u8, len: usize) -> Result<Self, &'static str> {
         if len < size_of::<ShmHeader>() {
             return Err("shm smaller than header");
@@ -45,6 +50,10 @@ impl SharedTable {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn max_actuators(&self) -> usize {
