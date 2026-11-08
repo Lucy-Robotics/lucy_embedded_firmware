@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use memmap2::MmapMut;
 
-use libc;
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use std::ffi::CString;
 use std::io::Write;

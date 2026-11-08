@@ -6,7 +6,7 @@ const LEN: usize = frame_len(JOINTS);
 fn command<const N: usize>(seq: u32) -> Frame<N> {
     let mut torque_enabled = [false; N];
     for (i, t) in torque_enabled.iter_mut().enumerate() {
-        *t = i % 2 == 0;
+        *t = i.is_multiple_of(2);
     }
     Frame::new(
         seq,

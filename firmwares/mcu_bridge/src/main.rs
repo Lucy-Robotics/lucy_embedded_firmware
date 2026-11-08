@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use memmap2::MmapMut;
 
-use libc;
 use lucy_embedded_firmware_communication::{
     Body, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
@@ -58,7 +57,7 @@ fn open_shm(name: &str, min_len: usize) -> File {
 fn read_commands(shm: &SharedTable, n: usize) -> JointCommands<JOINTS> {
     loop {
         let before = shm.header().command_seq.load(Ordering::Acquire);
-        if before % 2 != 0 {
+        if !before.is_multiple_of(2) {
             std::hint::spin_loop();
             continue;
         }
