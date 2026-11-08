@@ -1,0 +1,17 @@
+coverage:
+  status:
+    project:
+      default:
+        # No verified baseline (coverage wasn't measured on this repo before);
+        # gate on "don't regress vs. the base branch" rather than a guessed
+        # fixed target. Replace with a real % floor once a few runs land.
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 70%
+        threshold: 5%
+
+comment:
+  layout: "diff, flags, files"
+  require_changes: true
