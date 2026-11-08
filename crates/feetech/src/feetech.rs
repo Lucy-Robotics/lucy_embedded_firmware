@@ -325,7 +325,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             .servos
             .iter()
             .zip(command.iter())
-            .zip(payload.chunks_exact_mut(SYNC_WRITE_CHUNK_LEN));
+            .zip(payload.as_chunks_mut::<SYNC_WRITE_CHUNK_LEN>().0);
 
         for ((&cfg, &cmd), slot) in iter {
             let value: u8 = match cmd.torque_enabled {
