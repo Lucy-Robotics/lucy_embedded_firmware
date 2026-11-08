@@ -192,7 +192,7 @@ fn attach_shm(name: &str, min_len: usize) -> File {
 fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
     UsbPortConfig::new(0x2e8a, 0x0003, 1_000_000)
         .open(serial)
-        .map(|port| (port, Board::Rp2040))
+        .and_then(|mut port| port.clear().map(|()| (port, Board::Rp2040)))
         .or_else(|e| {
             if e.kind() != std::io::ErrorKind::NotFound {
                 return Err(e);
