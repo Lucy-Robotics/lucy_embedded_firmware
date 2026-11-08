@@ -53,14 +53,15 @@ fn main() -> ! {
     loop {
         resources.watchdog.feed();
         let now = resources.clock.tcnt1().read().bits();
-        let Ok(byte) = resources.serial.read() else {
-            if last_command.is_some_and(|t| now.wrapping_sub(t) > COMMAND_TIMEOUT_TICKS) {
-                for joint in robot.joints_command.iter_mut() {
-                    joint.torque_enabled = TorqueStatus::Disabled;
-                }
-                robot_tick(tick, &mut robot, &mut resources);
-                last_command = None;
+        // checked on every pass so a stream of bad bytes cannot hold torque on
+        if last_command.is_some_and(|t| now.wrapping_sub(t) > COMMAND_TIMEOUT_TICKS) {
+            for joint in robot.joints_command.iter_mut() {
+                joint.torque_enabled = TorqueStatus::Disabled;
             }
+            robot_tick(tick, &mut robot, &mut resources);
+            last_command = None;
+        }
+        let Ok(byte) = resources.serial.read() else {
             continue;
         };
         match decoder.push_byte(byte) {
