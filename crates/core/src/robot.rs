@@ -1,5 +1,5 @@
-use crate::joint::{*};
-use crate::data::{*};
+use crate::data::*;
+use crate::joint::*;
 
 pub struct Robot<const M: usize> {
     pub joints_config: &'static [CommandConfig],

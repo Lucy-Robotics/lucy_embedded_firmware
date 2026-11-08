@@ -4,8 +4,8 @@
 use lucy_embedded_firmware_core::joint::TorqueStatus;
 use lucy_embedded_firmware_core::robot::Robot;
 
-use rp2040_hal::fugit::MicrosDurationU64;
 use rp2040_hal::fugit::ExtU32;
+use rp2040_hal::fugit::MicrosDurationU64;
 
 use usb_device::{class_prelude::*, prelude::*};
 
@@ -15,19 +15,19 @@ use picotool_reset::PicoToolReset;
 use smart_leds::RGB8;
 
 use lucy_embedded_firmware_communication::{
-    encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
+    Body, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
 
 use cortex_m_rt::entry;
 use panic_halt as _;
 
-mod ws2812;
-mod channel;
 mod board;
+mod channel;
+mod ws2812;
 use board::init;
 mod config;
-use config::{get_robot, JOINTS};
 use config::robot_tick;
+use config::{JOINTS, get_robot};
 
 type Serial<'a, B> = usbd_serial::SerialPort<'a, B, [u8; 512], [u8; 512]>;
 
@@ -81,7 +81,12 @@ fn read_commands<B: usb_device::bus::UsbBus>(
             Ok(0) | Err(_) => break,
             Ok(count) => {
                 for &byte in &buf[..count] {
-                    if let Some(Ok(Frame { seq, body: Body::Command(c), .. })) = decoder.push_byte(byte) {
+                    if let Some(Ok(Frame {
+                        seq,
+                        body: Body::Command(c),
+                        ..
+                    })) = decoder.push_byte(byte)
+                    {
                         *commands = c;
                         last_seq = Some(seq);
                     }
@@ -209,7 +214,11 @@ fn main() -> ! {
             led_tick = resources.timer.get_counter().ticks();
             let level = 50 * (led_on as u8);
             let bus_error = last_error_tick != 0 && led_tick - last_error_tick < 1_000_000;
-            let color = if bus_error { RGB8::new(level, 0, 0) } else { RGB8::new(0, level, 0) };
+            let color = if bus_error {
+                RGB8::new(level, 0, 0)
+            } else {
+                RGB8::new(0, level, 0)
+            };
             ws2812.set_color(0, color);
             led_on = !led_on;
         }

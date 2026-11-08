@@ -1,7 +1,7 @@
-use std::io::{Read, Write};
-use std::io;
-use std::time::Duration;
 use serialport::{SerialPortType, UsbPortInfo};
+use std::io;
+use std::io::{Read, Write};
+use std::time::Duration;
 
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 

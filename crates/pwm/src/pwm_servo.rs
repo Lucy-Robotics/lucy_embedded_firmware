@@ -1,12 +1,12 @@
 use crate::pwm_channel::PwmChannel;
-use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
-use lucy_embedded_firmware_core::utils::map_range;
 use core::f32::consts::PI;
 use core::marker::PhantomData;
+use lucy_embedded_firmware_core::actuator::ActuatorGroup;
+use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
+use lucy_embedded_firmware_core::utils::map_range;
 
 pub enum PwmServoError {
-    CommunicationError
+    CommunicationError,
 }
 
 pub struct PwmServoConfig {
@@ -43,7 +43,13 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
     type Error = PwmServoError;
     type Bus = C;
 
-    fn update(&mut self, _tick: u64, bus: &mut Self::Bus, command: &mut [Command], _state: &mut [State]) -> Result<(), Self::Error> {
+    fn update(
+        &mut self,
+        _tick: u64,
+        bus: &mut Self::Bus,
+        command: &mut [Command],
+        _state: &mut [State],
+    ) -> Result<(), Self::Error> {
         self.set_torque(bus, command)?;
         self.set_pwm(bus, command)?;
         Ok(())
@@ -51,7 +57,11 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
 }
 
 impl<C: PwmChannel> PwmServoDriver<C> {
-    pub fn set_pwm(&mut self, bus: &mut <Self as ActuatorGroup>::Bus, command: &mut [Command]) -> Result<(), <Self as ActuatorGroup>::Error> {
+    pub fn set_pwm(
+        &mut self,
+        bus: &mut <Self as ActuatorGroup>::Bus,
+        command: &mut [Command],
+    ) -> Result<(), <Self as ActuatorGroup>::Error> {
         if command[0].torque_enabled != TorqueStatus::Enabled {
             return Ok(());
         }
@@ -69,8 +79,11 @@ impl<C: PwmChannel> PwmServoDriver<C> {
         Ok(())
     }
 
-
-    pub fn set_torque(&mut self, bus: &mut <Self as ActuatorGroup>::Bus, command: &mut [Command]) -> Result<(), <Self as ActuatorGroup>::Error> {
+    pub fn set_torque(
+        &mut self,
+        bus: &mut <Self as ActuatorGroup>::Bus,
+        command: &mut [Command],
+    ) -> Result<(), <Self as ActuatorGroup>::Error> {
         let value = if command[0].torque_enabled == TorqueStatus::Enabled {
             command[0].position
         } else {

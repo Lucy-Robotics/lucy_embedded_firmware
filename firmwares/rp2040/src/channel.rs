@@ -1,25 +1,19 @@
-use lucy_embedded_firmware_pwm::pwm_channel::PwmChannel;
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
+use lucy_embedded_firmware_pwm::pwm_channel::PwmChannel;
 
-use embedded_hal::{
-    digital::OutputPin,
-    pwm::SetDutyCycle,
-};
+use embedded_hal::{digital::OutputPin, pwm::SetDutyCycle};
 
-use rp2040_hal::{
-    uart,
-    timer::Timer,
-};
+use rp2040_hal::{timer::Timer, uart};
 
 pub enum PwmError {
     WriteError,
 }
 
-pub struct Rp2040PwmChannel<C> 
+pub struct Rp2040PwmChannel<C>
 where
     C: SetDutyCycle,
 {
-    pub channel: C
+    pub channel: C,
 }
 
 impl<C> PwmChannel for Rp2040PwmChannel<C>
@@ -49,8 +43,8 @@ pub struct Rp2040UartChannel<D, C, P>
 where
     D: OutputPin,
     C: uart::UartDevice,
-    P: uart::ValidUartPinout<C>
-    {
+    P: uart::ValidUartPinout<C>,
+{
     pub dir: D,
     pub uart: uart::UartPeripheral<uart::Enabled, C, P>,
     pub timer: Timer,
@@ -60,7 +54,7 @@ impl<D, C, P> SerialChannel for Rp2040UartChannel<D, C, P>
 where
     D: OutputPin,
     C: uart::UartDevice,
-    P: uart::ValidUartPinout<C>
+    P: uart::ValidUartPinout<C>,
 {
     type Error = UartError;
 

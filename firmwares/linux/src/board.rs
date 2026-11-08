@@ -1,5 +1,5 @@
-use crate::usb_port::UsbPortConfig;
 use crate::resources::Resources;
+use crate::usb_port::UsbPortConfig;
 
 pub fn init() -> Resources {
     let cfg = UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000);

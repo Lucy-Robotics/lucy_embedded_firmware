@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
-use usb_device::class_prelude::{InterfaceNumber, StringIndex, UsbBus, UsbBusAllocator};
 use usb_device::LangID;
+use usb_device::class_prelude::{InterfaceNumber, StringIndex, UsbBus, UsbBusAllocator};
 
 const CLASS_VENDOR_SPECIFIC: u8 = 0xFF;
 const RESET_INTERFACE_SUBCLASS: u8 = 0x00;

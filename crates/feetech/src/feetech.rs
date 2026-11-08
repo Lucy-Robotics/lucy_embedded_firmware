@@ -1,11 +1,11 @@
 use crate::serial_channel::SerialChannel;
 
-use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::joint::{*};
+use lucy_embedded_firmware_core::actuator::ActuatorGroup;
+use lucy_embedded_firmware_core::joint::*;
 
 use lucy_embedded_firmware_core::utils::map_range;
 
-use core::f32::consts::{TAU};
+use core::f32::consts::TAU;
 use core::marker::PhantomData;
 
 // === Request builder ===
@@ -35,10 +35,7 @@ impl<const N: usize> RequestBuilder<N> {
     }
 
     fn set_id(self, id: u8) -> Self {
-        RequestBuilder {
-            id,
-            ..self
-        }
+        RequestBuilder { id, ..self }
     }
 
     fn set_instruction(self, instruction: u8) -> Self {
@@ -49,10 +46,7 @@ impl<const N: usize> RequestBuilder<N> {
     }
 
     fn set_register(self, register: u8) -> Self {
-        RequestBuilder {
-            register,
-            ..self
-        }
+        RequestBuilder { register, ..self }
     }
 
     fn set_sync_length(self, length: u8) -> Self {
@@ -107,7 +101,8 @@ fn read_status<S: SerialChannel>(bus: &mut S, params: &mut [u8]) -> Result<u8, F
             return Err(FeetechBusError::CommunicationError);
         }
 
-        bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+        bus.read(&mut byte)
+            .map_err(|_| FeetechBusError::CommunicationError)?;
         if !(prev == 0xFF && byte[0] == 0xFF) {
             prev = byte[0];
             skipped += 1;
@@ -116,11 +111,13 @@ fn read_status<S: SerialChannel>(bus: &mut S, params: &mut [u8]) -> Result<u8, F
 
         let mut id = 0xFFu8;
         while id == 0xFF && skipped <= MAX_SKIPPED_BYTES {
-            bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+            bus.read(&mut byte)
+                .map_err(|_| FeetechBusError::CommunicationError)?;
             id = byte[0];
             skipped += 1;
         }
-        bus.read(&mut byte).map_err(|_| FeetechBusError::CommunicationError)?;
+        bus.read(&mut byte)
+            .map_err(|_| FeetechBusError::CommunicationError)?;
         let len = byte[0] as usize;
         prev = 0;
 
@@ -129,7 +126,8 @@ fn read_status<S: SerialChannel>(bus: &mut S, params: &mut [u8]) -> Result<u8, F
             skipped += 2;
             continue;
         }
-        bus.read(&mut body[..len]).map_err(|_| FeetechBusError::CommunicationError)?;
+        bus.read(&mut body[..len])
+            .map_err(|_| FeetechBusError::CommunicationError)?;
 
         let sum = [id, len as u8]
             .iter()
@@ -208,7 +206,7 @@ pub struct FeetechBusConfig<const N: usize> {
 
 pub struct FeetechBusDriver<S: SerialChannel, const N: usize> {
     _state: PhantomData<fn() -> S>,
-    pub config: &'static FeetechBusConfig<N>
+    pub config: &'static FeetechBusConfig<N>,
 }
 
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
@@ -218,14 +216,19 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             config,
         }
     }
-
 }
 
 impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> {
     type Error = FeetechBusError;
     type Bus = S;
 
-    fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error> {
+    fn update(
+        &mut self,
+        tick: u64,
+        bus: &mut Self::Bus,
+        command: &mut [Command],
+        state: &mut [State],
+    ) -> Result<(), Self::Error> {
         let torque = self.set_torque(bus, command);
         let position = self.set_position(bus, command);
         let feedback = self.read_position(bus, state);
@@ -239,7 +242,11 @@ impl<S: SerialChannel, const N: usize> ActuatorGroup for FeetechBusDriver<S, N> 
 }
 
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
-    pub fn set_position(&mut self, bus: &mut S, command: &[Command]) -> Result<(), FeetechBusError> {
+    pub fn set_position(
+        &mut self,
+        bus: &mut S,
+        command: &[Command],
+    ) -> Result<(), FeetechBusError> {
         const SYNC_WRITE_CHUNK_LEN: usize = 7;
         const SYNC_WRITE_DATA_LEN: u8 = 6;
 
@@ -313,7 +320,9 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             return Err(FeetechBusError::OutOfLimits);
         }
 
-        let iter = self.config.servos
+        let iter = self
+            .config
+            .servos
             .iter()
             .zip(command.iter())
             .zip(payload.chunks_exact_mut(SYNC_WRITE_CHUNK_LEN));
@@ -347,7 +356,11 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
 }
 
 impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
-    pub fn read_temperature(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_temperature(
+        &mut self,
+        bus: &mut S,
+        state: &mut [State],
+    ) -> Result<(), FeetechBusError> {
         const REG_TEMP: u8 = 0x3F;
 
         if state.len() != N {
@@ -416,7 +429,12 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         current.and(load)
     }
 
-    fn request_sync_read(&self, bus: &mut S, register: u8, length: u8) -> Result<(), FeetechBusError> {
+    fn request_sync_read(
+        &self,
+        bus: &mut S,
+        register: u8,
+        length: u8,
+    ) -> Result<(), FeetechBusError> {
         let mut ids = [0u8; 64];
         if N > ids.len() {
             return Err(FeetechBusError::OutOfLimits);
@@ -440,7 +458,11 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             .map_err(|_| FeetechBusError::CommunicationError)
     }
 
-    pub fn read_position(&mut self, bus: &mut S, state: &mut [State]) -> Result<(), FeetechBusError> {
+    pub fn read_position(
+        &mut self,
+        bus: &mut S,
+        state: &mut [State],
+    ) -> Result<(), FeetechBusError> {
         const REG_PRESENT_POSITION: u8 = 0x38;
 
         if state.len() != N {

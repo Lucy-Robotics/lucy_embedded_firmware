@@ -5,12 +5,12 @@ use std::time::{Duration, Instant};
 
 use memmap2::MmapMut;
 
+use libc;
+use lucy_embedded_firmware_communication::{
+    Body, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
+};
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use lucy_embedded_firmware_communication::{
-    encode, frame_len, Body, Frame, FrameDecoder, JointCommands, JointStates,
-};
-use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
@@ -38,7 +38,10 @@ fn open_shm(name: &str, min_len: usize) -> File {
         panic!(
             "shm_open(\"{name}\") failed: {}. Is the ROS 2 stack running with node_name={}?",
             std::io::Error::last_os_error(),
-            name.trim_start_matches('/').split('.').next().unwrap_or(name),
+            name.trim_start_matches('/')
+                .split('.')
+                .next()
+                .unwrap_or(name),
         );
     }
     let file = unsafe { File::from_raw_fd(fd) };
@@ -64,7 +67,11 @@ fn read_commands(shm: &SharedTable, n: usize) -> JointCommands<JOINTS> {
         commands.positions[..n].copy_from_slice(&shm.hw_commands()[..n]);
         commands.velocities[..n].copy_from_slice(&shm.hw_velocities()[..n]);
         commands.accelerations[..n].copy_from_slice(&shm.hw_accelerations()[..n]);
-        for (enabled, &t) in commands.torque_enabled.iter_mut().zip(&shm.hw_torque_enabled()[..n]) {
+        for (enabled, &t) in commands
+            .torque_enabled
+            .iter_mut()
+            .zip(&shm.hw_torque_enabled()[..n])
+        {
             *enabled = t >= 0.5;
         }
 
@@ -102,10 +109,17 @@ fn wait_reply(
         };
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
-                Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => {
+                Some(Ok(Frame {
+                    seq: s,
+                    body: Body::State(states),
+                    ..
+                })) if s == seq => {
                     return Some(states);
                 }
-                Some(Ok(frame)) => eprintln!("Ignoring unexpected frame seq={} (waiting for {seq})", frame.seq),
+                Some(Ok(frame)) => eprintln!(
+                    "Ignoring unexpected frame seq={} (waiting for {seq})",
+                    frame.seq
+                ),
                 Some(Err(e)) => eprintln!("Dropping corrupt frame from rp2040: {e}"),
                 None => {}
             }
@@ -118,10 +132,7 @@ fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let shm_file = open_shm(
-        &format!("/{node}"),
-        size_of::<ShmHeader>(),
-    );
+    let shm_file = open_shm(&format!("/{node}"), size_of::<ShmHeader>());
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
     let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
@@ -167,7 +178,10 @@ fn main() {
         if now < next_tick {
             std::thread::sleep(next_tick - now);
         } else {
-            eprintln!("Warning: tick took longer than expected {:?}", now - next_tick);
+            eprintln!(
+                "Warning: tick took longer than expected {:?}",
+                now - next_tick
+            );
             next_tick = now;
         }
     }

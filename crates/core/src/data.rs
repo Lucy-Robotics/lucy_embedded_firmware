@@ -63,19 +63,47 @@ impl SharedTable {
         unsafe { core::slice::from_raw_parts_mut(self.array(idx), self.max_actuators()) }
     }
 
-    pub fn hw_commands(&self) -> &[f32] { self.slice(0) }
-    pub fn hw_velocities(&self) -> &[f32] { self.slice(1) }
-    pub fn hw_accelerations(&self) -> &[f32] { self.slice(2) }
-    pub fn hw_torque_enabled(&self) -> &[f32] { self.slice(3) }
+    pub fn hw_commands(&self) -> &[f32] {
+        self.slice(0)
+    }
+    pub fn hw_velocities(&self) -> &[f32] {
+        self.slice(1)
+    }
+    pub fn hw_accelerations(&self) -> &[f32] {
+        self.slice(2)
+    }
+    pub fn hw_torque_enabled(&self) -> &[f32] {
+        self.slice(3)
+    }
 
-    pub fn hw_positions(&self) -> &[f32] { self.slice(4) }
-    pub fn hw_positions_mut(&mut self) -> &mut [f32] { self.slice_mut(4) }
-    pub fn hw_temperatures(&self) -> &[f32] { self.slice(5) }
-    pub fn hw_temperatures_mut(&mut self) -> &mut [f32] { self.slice_mut(5) }
-    pub fn hw_efforts(&self) -> &[f32] { self.slice(6) }
-    pub fn hw_efforts_mut(&mut self) -> &mut [f32] { self.slice_mut(6) }
-    pub fn hw_currents(&self) -> &[f32] { self.slice(7) }
-    pub fn hw_currents_mut(&mut self) -> &mut [f32] { self.slice_mut(7) }
-    pub fn hw_loads(&self) -> &[f32] { self.slice(8) }
-    pub fn hw_loads_mut(&mut self) -> &mut [f32] { self.slice_mut(8) }
+    pub fn hw_positions(&self) -> &[f32] {
+        self.slice(4)
+    }
+    pub fn hw_positions_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(4)
+    }
+    pub fn hw_temperatures(&self) -> &[f32] {
+        self.slice(5)
+    }
+    pub fn hw_temperatures_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(5)
+    }
+    pub fn hw_efforts(&self) -> &[f32] {
+        self.slice(6)
+    }
+    pub fn hw_efforts_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(6)
+    }
+    pub fn hw_currents(&self) -> &[f32] {
+        self.slice(7)
+    }
+    pub fn hw_currents_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(7)
+    }
+    pub fn hw_loads(&self) -> &[f32] {
+        self.slice(8)
+    }
+    pub fn hw_loads_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(8)
+    }
 }

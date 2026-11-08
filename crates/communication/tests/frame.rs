@@ -8,15 +8,21 @@ fn command<const N: usize>(seq: u32) -> Frame<N> {
     for (i, t) in torque_enabled.iter_mut().enumerate() {
         *t = i % 2 == 0;
     }
-    Frame::new(seq, Body::Command(JointCommands {
-        positions: [core::f32::consts::PI; N],
-        velocities: [0.5; N],
-        accelerations: [f32::from_bits(0xAAAA_0000); N],
-        torque_enabled,
-    }))
+    Frame::new(
+        seq,
+        Body::Command(JointCommands {
+            positions: [core::f32::consts::PI; N],
+            velocities: [0.5; N],
+            accelerations: [f32::from_bits(0xAAAA_0000); N],
+            torque_enabled,
+        }),
+    )
 }
 
-fn feed<const N: usize>(decoder: &mut FrameDecoder<'_, N>, bytes: &[u8]) -> Option<Result<Frame<N>, Error>> {
+fn feed<const N: usize>(
+    decoder: &mut FrameDecoder<'_, N>,
+    bytes: &[u8],
+) -> Option<Result<Frame<N>, Error>> {
     let mut last = None;
     for &b in bytes {
         if let Some(r) = decoder.push_byte(b) {
@@ -34,7 +40,10 @@ fn roundtrip() {
     assert!(!buf[..n - 1].contains(&0));
 
     let mut rx = [0u8; LEN];
-    assert_eq!(feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]), Some(Ok(command(42))));
+    assert_eq!(
+        feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]),
+        Some(Ok(command(42)))
+    );
 }
 
 #[test]
@@ -45,18 +54,24 @@ fn frame_len_fits_worst_case() {
 
 #[test]
 fn state_roundtrip() {
-    let state = Frame::new(7, Body::State(JointStates::<JOINTS> {
-        positions: [1.5; JOINTS],
-        temperatures: [42.0; JOINTS],
-        efforts: [-0.25; JOINTS],
-        currents: [0.8; JOINTS],
-        loads: [-0.3; JOINTS],
-    }));
+    let state = Frame::new(
+        7,
+        Body::State(JointStates::<JOINTS> {
+            positions: [1.5; JOINTS],
+            temperatures: [42.0; JOINTS],
+            efforts: [-0.25; JOINTS],
+            currents: [0.8; JOINTS],
+            loads: [-0.3; JOINTS],
+        }),
+    );
     let mut buf = [0u8; LEN];
     let n = encode(&state, &mut buf).unwrap();
 
     let mut rx = [0u8; LEN];
-    assert_eq!(feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]), Some(Ok(state)));
+    assert_eq!(
+        feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]),
+        Some(Ok(state))
+    );
 }
 
 #[test]
@@ -65,7 +80,10 @@ fn supports_more_than_32_joints() {
     let n = encode(&command::<40>(1), &mut buf).unwrap();
 
     let mut rx = [0u8; frame_len(40)];
-    assert_eq!(feed(&mut FrameDecoder::<40>::new(&mut rx), &buf[..n]), Some(Ok(command(1))));
+    assert_eq!(
+        feed(&mut FrameDecoder::<40>::new(&mut rx), &buf[..n]),
+        Some(Ok(command(1)))
+    );
 }
 
 #[test]
@@ -84,7 +102,10 @@ fn detects_corruption() {
     let n = encode(&command::<JOINTS>(1), &mut buf).unwrap();
     buf[n / 2] ^= 0x01;
     let mut rx = [0u8; LEN];
-    assert!(matches!(feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]), Some(Err(_))));
+    assert!(matches!(
+        feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]),
+        Some(Err(_))
+    ));
 }
 
 #[test]
@@ -107,7 +128,10 @@ fn rejects_other_joint_count() {
     let mut rx = [0u8; frame_len(10)];
     assert_eq!(
         feed(&mut FrameDecoder::<JOINTS>::new(&mut rx), &buf[..n]),
-        Some(Err(Error::JointCount { expected: JOINTS as u32, received: 10 }))
+        Some(Err(Error::JointCount {
+            expected: JOINTS as u32,
+            received: 10
+        }))
     );
 }
 
