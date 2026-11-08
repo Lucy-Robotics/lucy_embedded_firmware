@@ -160,10 +160,10 @@ fn main() -> ! {
     let mut descriptors = StringDescriptors::default()
         .manufacturer("Pimoroni")
         .product("Servo2040 Serial");
-    if let Some(serial_number) = option_env!("DEVICE_SERIAL_NUMBER") {
-        if !serial_number.is_empty() {
-            descriptors = descriptors.serial_number(serial_number);
-        }
+    if let Some(serial_number) = option_env!("DEVICE_SERIAL_NUMBER")
+        && !serial_number.is_empty()
+    {
+        descriptors = descriptors.serial_number(serial_number);
     }
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x2e8a, 0x0003))
         .strings(&[descriptors])
@@ -202,10 +202,10 @@ fn main() -> ! {
         }
         tick_count = tick_count.wrapping_add(1);
 
-        if frame_writer.is_idle() {
-            if let Some(seq) = pending_reply.take() {
-                frame_writer.start(&Frame::new(seq, Body::State(collect_states(&robot))));
-            }
+        if frame_writer.is_idle()
+            && let Some(seq) = pending_reply.take()
+        {
+            frame_writer.start(&Frame::new(seq, Body::State(collect_states(&robot))));
         }
         frame_writer.flush(&mut serial);
 

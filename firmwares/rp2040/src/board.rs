@@ -36,6 +36,9 @@ pub struct Resources {
 
     // GENERATED
     pub uart0: Uart0Channel,
+    // Configured but not yet wired into robot_tick for this board; keep the
+    // init-time PWM setup, silence the unread-field lint until it drives a joint.
+    #[allow(dead_code)]
     pub servo3: Servo3Channel,
 }
 

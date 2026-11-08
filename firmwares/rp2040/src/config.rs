@@ -5,7 +5,6 @@ use lucy_embedded_firmware_core::robot::Robot;
 use lucy_embedded_firmware_feetech::feetech::{
     FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
 };
-use lucy_embedded_firmware_pwm::pwm_servo::{PwmServoConfig, PwmServoDriver};
 
 use crate::board::Resources;
 use crate::board::Uart0Channel;
@@ -126,18 +125,14 @@ pub fn get_robot() -> Robot<JOINTS> {
     }
 }
 
-use crate::board::Servo3Channel;
-
 pub fn robot_tick(tick: u64, robot: &mut Robot<JOINTS>, resources: &mut Resources) -> bool {
     let mut driver = FeetechBusDriver::<Uart0Channel, 6>::new(&FEETECH_0);
-    let feetech_ok = driver
+    driver
         .update(
             tick,
             &mut resources.uart0,
             &mut robot.joints_command[0..6],
             &mut robot.joints_state[0..6],
         )
-        .is_ok();
-
-    feetech_ok
+        .is_ok()
 }
