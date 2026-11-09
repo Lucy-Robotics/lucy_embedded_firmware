@@ -1,27 +1,9 @@
-//! The restore-homing request's own precondition and the entries-to-records conversion.
+//! Converting restore-homing entries into the records the bus write actually needs.
 
 use lucy_embedded_firmware_feetech::feetech::HomingRecord;
 
-use std::time::Duration;
-
 use crate::config::FEETECH_0;
-use crate::maintenance::{RestoreEntry, json_error};
-use crate::resources::Resources;
-
-const EEPROM_DELAY: Duration = Duration::from_millis(20);
-
-/// An EEPROM write must name the adapter that is actually open.
-pub(super) fn check_open_serial(resources: &Resources, serial: &str) -> Result<(), String> {
-    match &resources.open_adapter {
-        None => Err(json_error("no_adapter")),
-        Some(open) if open.serial.as_deref() == Some(serial) => Ok(()),
-        Some(_) => Err(json_error("serial_mismatch")),
-    }
-}
-
-pub(super) fn eeprom_delay() {
-    std::thread::sleep(EEPROM_DELAY);
-}
+use crate::maintenance::RestoreEntry;
 
 /// Exactly one valid entry per configured servo, in configuration order.
 pub(super) fn records_from_entries(entries: &[RestoreEntry]) -> Option<[HomingRecord; 6]> {
@@ -50,12 +32,7 @@ fn homing_record_from_entry(entry: &RestoreEntry) -> HomingRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{entries, open_on};
-
-    #[test]
-    fn naming_the_open_adapter_passes_the_serial_check() {
-        assert!(check_open_serial(&open_on(Some("REAL")), "REAL").is_ok());
-    }
+    use crate::test_support::entries;
 
     #[test]
     fn homing_record_from_entry_copies_every_field() {

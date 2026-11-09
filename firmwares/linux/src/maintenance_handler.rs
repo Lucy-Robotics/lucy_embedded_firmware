@@ -26,26 +26,19 @@ pub fn handle_maintenance(
 
     match request {
         Request::Status => status_json(robot, resources, telemetry),
-        Request::Select(serial) => handle_select(serial, robot, resources, telemetry),
+        Request::Select(serial) => {
+            if torque_on(robot) {
+                return json_error("torque_on");
+            }
+            resources.select(serial);
+            status_json(robot, resources, telemetry)
+        }
         Request::ReadHoming => handle_read_homing(resources),
         Request::SetHalfTurn { serial } => handle_set_half_turn(serial, robot, resources),
         Request::RestoreHoming { serial, entries } => {
             handle_restore_homing(serial, entries, robot, resources)
         }
     }
-}
-
-fn handle_select(
-    serial: String,
-    robot: &Robot<6>,
-    resources: &mut Resources,
-    telemetry: &Telemetry,
-) -> String {
-    if torque_on(robot) {
-        return json_error("torque_on");
-    }
-    resources.select(serial);
-    status_json(robot, resources, telemetry)
 }
 
 fn torque_on(robot: &Robot<6>) -> bool {

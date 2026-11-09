@@ -4,8 +4,8 @@ use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use super::super::protocol::{Request, parse_request};
 use super::{Client, Server};
+use crate::maintenance::protocol::{Request, parse_request};
 
 const MAX_LINE: usize = 4096;
 const MAX_CLIENTS: usize = 8;

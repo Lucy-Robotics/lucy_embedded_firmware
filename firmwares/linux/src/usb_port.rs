@@ -12,6 +12,11 @@ pub struct UsbPortConfig {
     pub baud_rate: u32,
 }
 
+/// The VID/PID/baud rate of the USB-to-serial adapter this robot ships with.
+pub(crate) fn lucy_usb_config() -> UsbPortConfig {
+    UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000)
+}
+
 /// A connected USB serial adapter with the configured VID/PID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adapter {

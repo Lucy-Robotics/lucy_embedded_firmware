@@ -6,10 +6,10 @@ use lucy_embedded_firmware_core::robot::Robot;
 use crate::config::get_robot;
 use crate::maintenance::RestoreEntry;
 use crate::resources::Resources;
-use crate::usb_port::{Adapter, UsbPortConfig};
+use crate::usb_port::{Adapter, lucy_usb_config};
 
 pub(crate) fn offline() -> Resources {
-    Resources::new(UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000))
+    Resources::new(lucy_usb_config())
 }
 
 pub(crate) fn open_on(serial: Option<&str>) -> Resources {
