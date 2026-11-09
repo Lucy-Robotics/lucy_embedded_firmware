@@ -5,12 +5,11 @@ use std::time::{Duration, Instant};
 
 use memmap2::MmapMut;
 
+use lucy_embedded_firmware_communication::{
+    Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
+};
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use lucy_embedded_firmware_communication::{
-    encode, frame_len, Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates,
-};
-use libc;
 use std::ffi::CString;
 use std::os::fd::FromRawFd;
 
@@ -48,7 +47,7 @@ impl std::fmt::Display for ReplyError {
 fn read_commands<const N: usize>(shm: &SharedTable, n: usize) -> JointCommands<N> {
     loop {
         let before = shm.header().command_seq.load(Ordering::Acquire);
-        if before % 2 != 0 {
+        if !before.is_multiple_of(2) {
             std::hint::spin_loop();
             continue;
         }
@@ -57,7 +56,11 @@ fn read_commands<const N: usize>(shm: &SharedTable, n: usize) -> JointCommands<N
         commands.positions[..n].copy_from_slice(&shm.hw_commands()[..n]);
         commands.velocities[..n].copy_from_slice(&shm.hw_velocities()[..n]);
         commands.accelerations[..n].copy_from_slice(&shm.hw_accelerations()[..n]);
-        for (enabled, &t) in commands.torque_enabled.iter_mut().zip(&shm.hw_torque_enabled()[..n]) {
+        for (enabled, &t) in commands
+            .torque_enabled
+            .iter_mut()
+            .zip(&shm.hw_torque_enabled()[..n])
+        {
             *enabled = t >= 0.5;
         }
 
@@ -93,7 +96,11 @@ fn wait_reply<const N: usize>(
         };
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
-                Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => return Ok(states),
+                Some(Ok(Frame {
+                    seq: s,
+                    body: Body::State(states),
+                    ..
+                })) if s == seq => return Ok(states),
                 Some(Ok(_)) | None => {}
                 Some(Err(e)) => corrupt = Some(e),
             }
@@ -121,7 +128,8 @@ fn parse_pca_addresses(arg: &str) -> Vec<u8> {
     arg.split(',')
         .filter_map(|a| {
             let a = a.trim();
-            a.strip_prefix("0x").map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
+            a.strip_prefix("0x")
+                .map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
         })
         .collect()
 }
@@ -267,9 +275,15 @@ fn run<const N: usize>(
     lock: Option<std::path::PathBuf>,
 ) -> ! {
     let n = shm.max_actuators();
-    let joints = if board == Board::Mega { N - 1 } else { N.min(n) };
+    let joints = if board == Board::Mega {
+        N - 1
+    } else {
+        N.min(n)
+    };
     if joints != n {
-        eprintln!("Warning: shm declares {n} joints but the link carries {joints}; only the first {joints} are forwarded");
+        eprintln!(
+            "Warning: shm declares {n} joints but the link carries {joints}; only the first {joints} are forwarded"
+        );
     }
 
     let mut rx_buf = vec![0u8; frame_len(N)];
@@ -323,7 +337,9 @@ fn run<const N: usize>(
                             println!("Board {label} answering");
                         }
                         if board == Board::Mega {
-                            for line in pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing) {
+                            for line in
+                                pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing)
+                            {
                                 println!("{line}");
                             }
                         }
@@ -363,7 +379,9 @@ fn run<const N: usize>(
         } else {
             let late = now - next_tick;
             if late > period {
-                problems.record(Problem::Late, || format!("Warning: tick took longer than expected {late:?}"));
+                problems.record(Problem::Late, || {
+                    format!("Warning: tick took longer than expected {late:?}")
+                });
             }
             next_tick = now;
         }
@@ -395,7 +413,11 @@ struct ProblemLog {
 
 impl ProblemLog {
     fn new() -> Self {
-        Self { counts: [0; 4], reported: [false; 4], since: std::time::Instant::now() }
+        Self {
+            counts: [0; 4],
+            reported: [false; 4],
+            since: std::time::Instant::now(),
+        }
     }
 
     fn record(&mut self, problem: Problem, detail: impl FnOnce() -> String) {
@@ -404,7 +426,11 @@ impl ProblemLog {
             self.counts[i] += 1;
         } else {
             self.reported[i] = true;
-            eprintln!("{} (repeats are summed up every {}s)", detail(), SUMMARY_PERIOD.as_secs());
+            eprintln!(
+                "{} (repeats are summed up every {}s)",
+                detail(),
+                SUMMARY_PERIOD.as_secs()
+            );
         }
     }
 
@@ -476,9 +502,15 @@ mod tests {
         assert!(pca_changes(&pcas, 0.0, &mut last).is_empty());
         assert_eq!(
             pca_changes(&pcas, (0x100 | 0b10) as f32, &mut last),
-            ["PCA9685 0x41 answering", "PCA9685 0x40 not answering: its servos can't move"]
+            [
+                "PCA9685 0x41 answering",
+                "PCA9685 0x40 not answering: its servos can't move"
+            ]
         );
         assert!(pca_changes(&pcas, (0x100 | 0b10) as f32, &mut last).is_empty());
-        assert_eq!(pca_changes(&pcas, 0x100 as f32, &mut last), ["PCA9685 0x40 answering"]);
+        assert_eq!(
+            pca_changes(&pcas, 0x100 as f32, &mut last),
+            ["PCA9685 0x40 answering"]
+        );
     }
 }

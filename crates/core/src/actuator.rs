@@ -14,5 +14,11 @@ pub trait ActuatorGroup {
     type Bus;
     type Error;
 
-    fn update(&mut self, tick: u64, bus: &mut Self::Bus, command: &mut [Command], state: &mut [State]) -> Result<(), Self::Error>;
+    fn update(
+        &mut self,
+        tick: u64,
+        bus: &mut Self::Bus,
+        command: &mut [Command],
+        state: &mut [State],
+    ) -> Result<(), Self::Error>;
 }

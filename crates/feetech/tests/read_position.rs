@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 
 use lucy_embedded_firmware_core::joint::State;
-use lucy_embedded_firmware_feetech::feetech::{FeetechBusConfig, FeetechBusDriver, FeetechServoConfig};
+use lucy_embedded_firmware_feetech::feetech::{
+    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
+};
 use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
 
 struct MockBus {
@@ -109,8 +111,17 @@ fn reads_all_servos() {
 #[test]
 fn skips_echo_and_garbage() {
     // Echo of our SYNC_READ request (ID 0xFE) plus a stray byte before the real replies.
-    let echo = vec![0xFF, 0xFF, 0xFE, 0x07, 0x82, 0x38, 0x02, 0x01, 0x02, 0x03, 0x30];
-    let rx = [echo, vec![0x42], status(1, 100), status(2, 200), status(3, 300)].concat();
+    let echo = vec![
+        0xFF, 0xFF, 0xFE, 0x07, 0x82, 0x38, 0x02, 0x01, 0x02, 0x03, 0x30,
+    ];
+    let rx = [
+        echo,
+        vec![0x42],
+        status(1, 100),
+        status(2, 200),
+        status(3, 300),
+    ]
+    .concat();
     assert_eq!(read(rx), (true, vec![100.0, 200.0, 300.0]));
 }
 
@@ -163,13 +174,20 @@ fn effort_below_no_load_current_is_zero() {
 #[test]
 fn effort_scales_with_gear_ratio() {
     static GEARED: FeetechBusConfig<1> = FeetechBusConfig {
-        servos: [FeetechServoConfig { gear_ratio: 3.0, ..servo(1) }],
+        servos: [FeetechServoConfig {
+            gear_ratio: 3.0,
+            ..servo(1)
+        }],
     };
-    let mut bus = MockBus { rx: [status(1, 200), status(1, 0)].concat().into() };
+    let mut bus = MockBus {
+        rx: [status(1, 200), status(1, 0)].concat().into(),
+    };
     let mut state = [State::default(); 1];
-    assert!(FeetechBusDriver::<MockBus, 1>::new(&GEARED)
-        .read_effort(&mut bus, &mut state)
-        .is_ok());
+    assert!(
+        FeetechBusDriver::<MockBus, 1>::new(&GEARED)
+            .read_effort(&mut bus, &mut state)
+            .is_ok()
+    );
     assert!((state[0].effort - 3.0 * expected_effort(200)).abs() < EPS);
 }
 
@@ -209,6 +227,10 @@ fn missing_load_reply_keeps_current_and_effort() {
     );
     let (ok, state) = read_effort_states(rx);
     assert!(!ok);
-    assert!(state.iter().all(|s| (s.effort - expected_effort(200)).abs() < EPS));
+    assert!(
+        state
+            .iter()
+            .all(|s| (s.effort - expected_effort(200)).abs() < EPS)
+    );
     assert_eq!(state.map(|s| s.load), [0.5, 0.0, 0.5]);
 }

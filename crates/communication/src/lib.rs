@@ -2,7 +2,7 @@
 
 //! Frame: `COBS(postcard(Frame<N>) ++ CRC-16/MODBUS LE) ++ 0x00`.
 
-use crc::{Crc, Digest, CRC_16_MODBUS};
+use crc::{CRC_16_MODBUS, Crc, Digest};
 use postcard::ser_flavors::{Cobs, Flavor, Slice};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
@@ -81,7 +81,12 @@ pub struct Frame<const N: usize> {
 
 impl<const N: usize> Frame<N> {
     pub const fn new(seq: u32, body: Body<N>) -> Self {
-        Self { version: PROTOCOL_VERSION, joints: N as u32, seq, body }
+        Self {
+            version: PROTOCOL_VERSION,
+            joints: N as u32,
+            seq,
+            body,
+        }
     }
 }
 
@@ -145,7 +150,10 @@ impl<'a> Flavor for CrcCobs<'a> {
 
 pub fn encode<const N: usize>(frame: &Frame<N>, out: &mut [u8]) -> Result<usize, Error> {
     let cobs = Cobs::try_new(Slice::new(out)).map_err(|_| Error::Serialize)?;
-    let flavor = CrcCobs { cobs, digest: FRAME_CRC.digest() };
+    let flavor = CrcCobs {
+        cobs,
+        digest: FRAME_CRC.digest(),
+    };
     postcard::serialize_with_flavor(frame, flavor)
         .map(|written| written.len())
         .map_err(|_| Error::Serialize)
@@ -161,12 +169,16 @@ pub fn decode<const N: usize>(encoded: &mut [u8]) -> Result<Frame<N>, Error> {
         return Err(Error::Crc);
     }
 
-    let (header, _) = postcard::take_from_bytes::<Header>(payload).map_err(|_| Error::Deserialize)?;
+    let (header, _) =
+        postcard::take_from_bytes::<Header>(payload).map_err(|_| Error::Deserialize)?;
     if header.version != PROTOCOL_VERSION {
         return Err(Error::Version(header.version));
     }
     if header.joints != N as u32 {
-        return Err(Error::JointCount { expected: N as u32, received: header.joints });
+        return Err(Error::JointCount {
+            expected: N as u32,
+            received: header.joints,
+        });
     }
 
     match postcard::take_from_bytes::<Frame<N>>(payload) {
@@ -183,7 +195,11 @@ pub struct FrameDecoder<'a, const N: usize> {
 
 impl<'a, const N: usize> FrameDecoder<'a, N> {
     pub fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, len: 0, overflow: false }
+        Self {
+            buf,
+            len: 0,
+            overflow: false,
+        }
     }
 
     pub fn reset(&mut self) {

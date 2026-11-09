@@ -4,7 +4,6 @@ use std::time::Duration;
 use memmap2::MmapMut;
 
 use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
-use libc;
 use std::ffi::CString;
 use std::io::Write;
 use std::os::fd::FromRawFd;
@@ -15,8 +14,8 @@ mod resources;
 mod board;
 use board::init;
 
-mod usb_port;
 mod config;
+mod usb_port;
 use config::{get_robot, robot_release, robot_tick};
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
@@ -58,7 +57,10 @@ fn open_shm(name: &str, min_len: usize) -> File {
             panic!(
                 "shm_open(\"{name}\") failed after {SHM_OPEN_TIMEOUT:?}: {err}. \
                  Is the ROS 2 stack running with node_name={}?",
-                name.trim_start_matches('/').split('.').next().unwrap_or(name),
+                name.trim_start_matches('/')
+                    .split('.')
+                    .next()
+                    .unwrap_or(name),
             );
         }
         std::thread::sleep(SHM_OPEN_RETRY);
@@ -69,10 +71,7 @@ fn main() {
     let node = node_name();
     println!("Attaching to Lucy shared memory for node_name={node}");
 
-    let shm_file = open_shm(
-        &format!("/{node}"),
-        size_of::<ShmHeader>(),
-    );
+    let shm_file = open_shm(&format!("/{node}"), size_of::<ShmHeader>());
 
     let table_map = unsafe { MmapMut::map_mut(&shm_file).unwrap() };
     let mut ass = unsafe { SharedTable::from_raw(table_map.as_ptr() as *mut u8, table_map.len()) }
@@ -88,7 +87,10 @@ fn main() {
         }
     }
 
-    let mut last_command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
+    let mut last_command_seq = ass
+        .header()
+        .command_seq
+        .load(core::sync::atomic::Ordering::SeqCst);
 
     let period = Duration::from_millis(50);
     let mut next_tick = std::time::Instant::now();
@@ -97,7 +99,10 @@ fn main() {
     while !STOP.load(Ordering::SeqCst) {
         next_tick += period;
 
-        let command_seq = ass.header().command_seq.load(core::sync::atomic::Ordering::SeqCst);
+        let command_seq = ass
+            .header()
+            .command_seq
+            .load(core::sync::atomic::Ordering::SeqCst);
         if (command_seq % 2) == 0 && command_seq != last_command_seq {
             robot.sync_write_shm(&ass);
             last_command_seq = command_seq;
@@ -105,9 +110,13 @@ fn main() {
 
         robot_tick(tick_count, &mut robot, &mut board);
 
-        ass.header().state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        ass.header()
+            .state_seq
+            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         robot.sync_read_shm(&mut ass);
-        ass.header().state_seq.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        ass.header()
+            .state_seq
+            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
         if STOP.load(Ordering::SeqCst) {
             break;
@@ -117,7 +126,11 @@ fn main() {
         if now < next_tick {
             std::thread::sleep(next_tick - now);
         } else {
-            let _ = writeln!(std::io::stderr(), "Warning: tick took longer than expected {:?}", now - next_tick);
+            let _ = writeln!(
+                std::io::stderr(),
+                "Warning: tick took longer than expected {:?}",
+                now - next_tick
+            );
             next_tick = now;
         }
         tick_count += 1;

@@ -26,13 +26,12 @@ fn main() {
         println!("cargo:rustc-env=DEVICE_SERIAL_NUMBER={serial}");
     }
 
-    if config_path.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&config_path) {
-            if contents.contains("actuators:") && contents.contains("virtual_pin:") {
-                // TODO: re-enable once crates/builder compiles and is a build-dependency.
-                // build_config(config_path.to_string_lossy().into_owned());
-            }
-        }
+    if let Ok(contents) = std::fs::read_to_string(&config_path)
+        && contents.contains("actuators:")
+        && contents.contains("virtual_pin:")
+    {
+        // TODO: re-enable once crates/builder compiles and is a build-dependency.
+        // build_config(config_path.to_string_lossy().into_owned());
     }
 }
 

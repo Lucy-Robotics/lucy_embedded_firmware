@@ -1,5 +1,5 @@
-use crate::joint::{*};
-use crate::data::{*};
+use crate::data::*;
+use crate::joint::*;
 
 pub struct Robot<const M: usize> {
     pub joints_config: &'static [CommandConfig],
@@ -43,14 +43,22 @@ mod tests {
 
     const SHM_LEN: usize = ShmHeader::size_for(1);
 
-    static CONFIG: [CommandConfig; 1] = [CommandConfig { default: 0.5, limit_min: 0.5, limit_max: 2.0 }];
+    static CONFIG: [CommandConfig; 1] = [CommandConfig {
+        default: 0.5,
+        limit_min: 0.5,
+        limit_max: 2.0,
+    }];
 
     #[repr(C, align(64))]
     struct Segment([u8; SHM_LEN]);
 
     #[test]
     fn sync_write_shm_clamps_to_joint_limits() {
-        let mut robot = Robot::<1> { joints_config: &CONFIG, joints_command: [Command::default()], joints_state: [State::default()] };
+        let mut robot = Robot::<1> {
+            joints_config: &CONFIG,
+            joints_command: [Command::default()],
+            joints_state: [State::default()],
+        };
         let mut segment = Segment([0; SHM_LEN]);
         let base = segment.0.as_mut_ptr();
         unsafe { (*(base as *mut ShmHeader)).max_actuators = 1 };

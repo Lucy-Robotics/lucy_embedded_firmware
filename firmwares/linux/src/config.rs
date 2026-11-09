@@ -2,31 +2,117 @@ use lucy_embedded_firmware_core::actuator::ActuatorGroup;
 use lucy_embedded_firmware_core::joint::*;
 use lucy_embedded_firmware_core::robot::Robot;
 
-use lucy_embedded_firmware_feetech::feetech::{FeetechServoConfig, FeetechBusConfig, FeetechBusDriver};
+use lucy_embedded_firmware_feetech::feetech::{
+    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
+};
 
-use crate::usb_port::UsbPort;
 use crate::resources::Resources;
+use crate::usb_port::UsbPort;
 
 use core::f32::consts::{PI, TAU};
 use std::io::Write;
 
 pub const JOINTS_CONFIG: [CommandConfig; 6] = [
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
-    CommandConfig { default: PI, limit_min: 0.0, limit_max: TAU },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
+    CommandConfig {
+        default: PI,
+        limit_min: 0.0,
+        limit_max: TAU,
+    },
 ];
 
 pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {
     servos: [
-        FeetechServoConfig { id: 1, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
-        FeetechServoConfig { id: 2, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
-        FeetechServoConfig { id: 3, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
-        FeetechServoConfig { id: 4, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
-        FeetechServoConfig { id: 5, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
-        FeetechServoConfig { id: 6, amplitude: TAU, min_pulse: 0, max_pulse: 4096, torque: 2.94, gear_ratio: 1.0, stall_current: 2.7, no_load_current: 0.18, current_lsb: 0.0065 },
+        FeetechServoConfig {
+            id: 1,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
+        FeetechServoConfig {
+            id: 2,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
+        FeetechServoConfig {
+            id: 3,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
+        FeetechServoConfig {
+            id: 4,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
+        FeetechServoConfig {
+            id: 5,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
+        FeetechServoConfig {
+            id: 6,
+            amplitude: TAU,
+            min_pulse: 0,
+            max_pulse: 4096,
+            torque: 2.94,
+            gear_ratio: 1.0,
+            stall_current: 2.7,
+            no_load_current: 0.18,
+            current_lsb: 0.0065,
+        },
     ],
 };
 
@@ -38,11 +124,7 @@ pub fn get_robot() -> Robot<6> {
     }
 }
 
-pub fn robot_tick(
-    tick: u64,
-    robot: &mut Robot<6>,
-    resources: &mut Resources,
-) {
+pub fn robot_tick(tick: u64, robot: &mut Robot<6>, resources: &mut Resources) {
     let _ = driver().update(
         tick,
         &mut resources.usb0,
@@ -55,10 +137,15 @@ pub fn robot_release(resources: &mut Resources) {
     let mut driver = driver();
     let mut ok = false;
     for _ in 0..2 {
-        ok |= driver.set_torque(&mut resources.usb0, &[Command::default(); 6]).is_ok();
+        ok |= driver
+            .set_torque(&mut resources.usb0, &[Command::default(); 6])
+            .is_ok();
     }
     if !ok {
-        let _ = writeln!(std::io::stderr(), "Warning: torque off failed, the servos may still hold");
+        let _ = writeln!(
+            std::io::stderr(),
+            "Warning: torque off failed, the servos may still hold"
+        );
     }
 }
 

@@ -1,12 +1,12 @@
 use crate::pwm_channel::PwmChannel;
-use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
-use lucy_embedded_firmware_core::utils::map_range;
 use core::f32::consts::PI;
 use core::marker::PhantomData;
+use lucy_embedded_firmware_core::actuator::ActuatorGroup;
+use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
+use lucy_embedded_firmware_core::utils::map_range;
 
 pub enum PwmServoError {
-    CommunicationError
+    CommunicationError,
 }
 
 pub struct PwmServoConfig {
@@ -43,7 +43,13 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
     type Error = PwmServoError;
     type Bus = C;
 
-    fn update(&mut self, _tick: u64, bus: &mut Self::Bus, command: &mut [Command], _state: &mut [State]) -> Result<(), Self::Error> {
+    fn update(
+        &mut self,
+        _tick: u64,
+        bus: &mut Self::Bus,
+        command: &mut [Command],
+        _state: &mut [State],
+    ) -> Result<(), Self::Error> {
         self.set_torque(bus, command)?;
         self.set_pwm(bus, command)?;
         Ok(())
@@ -51,7 +57,11 @@ impl<C: PwmChannel> ActuatorGroup for PwmServoDriver<C> {
 }
 
 impl<C: PwmChannel> PwmServoDriver<C> {
-    pub fn set_pwm(&mut self, bus: &mut <Self as ActuatorGroup>::Bus, command: &mut [Command]) -> Result<(), <Self as ActuatorGroup>::Error> {
+    pub fn set_pwm(
+        &mut self,
+        bus: &mut <Self as ActuatorGroup>::Bus,
+        command: &mut [Command],
+    ) -> Result<(), <Self as ActuatorGroup>::Error> {
         if command[0].torque_enabled != TorqueStatus::Enabled {
             return Ok(());
         }
@@ -69,8 +79,11 @@ impl<C: PwmChannel> PwmServoDriver<C> {
         Ok(())
     }
 
-
-    pub fn set_torque(&mut self, bus: &mut <Self as ActuatorGroup>::Bus, command: &mut [Command]) -> Result<(), <Self as ActuatorGroup>::Error> {
+    pub fn set_torque(
+        &mut self,
+        bus: &mut <Self as ActuatorGroup>::Bus,
+        command: &mut [Command],
+    ) -> Result<(), <Self as ActuatorGroup>::Error> {
         if command[0].torque_enabled == TorqueStatus::Enabled {
             return Ok(());
         }
@@ -96,12 +109,22 @@ mod tests {
         }
     }
 
-    static CONFIG: PwmServoConfig = PwmServoConfig { amplitude: PI as f32, min_pulse: 500, max_pulse: 2500 };
+    static CONFIG: PwmServoConfig = PwmServoConfig {
+        amplitude: PI,
+        min_pulse: 500,
+        max_pulse: 2500,
+    };
 
     fn pulse_for(torque_enabled: TorqueStatus, position: f32) -> Option<u16> {
         let mut bus = LastPulse(None);
-        let mut command = [Command { position, torque_enabled, ..Command::default() }];
-        PwmServoDriver::new(&CONFIG).update(0, &mut bus, &mut command, &mut [State::default()]).ok();
+        let mut command = [Command {
+            position,
+            torque_enabled,
+            ..Command::default()
+        }];
+        PwmServoDriver::new(&CONFIG)
+            .update(0, &mut bus, &mut command, &mut [State::default()])
+            .ok();
         bus.0
     }
 
@@ -112,6 +135,6 @@ mod tests {
 
     #[test]
     fn torque_enabled_maps_position() {
-        assert_eq!(pulse_for(TorqueStatus::Enabled, PI as f32 / 2.0), Some(1500));
+        assert_eq!(pulse_for(TorqueStatus::Enabled, PI / 2.0), Some(1500));
     }
 }
