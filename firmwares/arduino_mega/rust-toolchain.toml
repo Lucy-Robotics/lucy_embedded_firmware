@@ -1,0 +1,5 @@
+# avr-hal's nightly miscompiles soft-float
+[toolchain]
+channel = "nightly-2026-10-19"
+components = ["rust-src"]
+profile = "minimal"

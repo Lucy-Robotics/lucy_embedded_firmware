@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*", "firmwares/*"]
+exclude = ["firmwares/arduino_mega"]
 resolver = "2"
 
 [workspace.dependencies]
