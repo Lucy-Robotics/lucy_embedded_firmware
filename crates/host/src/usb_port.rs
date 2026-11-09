@@ -10,12 +10,14 @@ use lucy_embedded_firmware_serial::SerialChannel;
 const RECONNECT_PERIOD: Duration = Duration::from_millis(500);
 const IO_TIMEOUT: Duration = Duration::from_millis(50);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsbPortConfig {
     pub target_vid: u16,
     pub target_pid: u16,
+    pub serial_number: Option<String>,
     pub baud_rate: u32,
     pub clear_buffer: ClearBuffer,
+    pub settle_delay: Duration,
 }
 
 impl UsbPortConfig {
@@ -23,8 +25,10 @@ impl UsbPortConfig {
         Self {
             target_vid,
             target_pid,
+            serial_number: None,
             baud_rate,
             clear_buffer: ClearBuffer::Input,
+            settle_delay: Duration::ZERO,
         }
     }
 
@@ -32,22 +36,43 @@ impl UsbPortConfig {
         Self { clear_buffer, ..self }
     }
 
-    fn open(&self) -> io::Result<(String, Box<dyn SerialPort>)> {
-        let port_info = serialport::available_ports()
+    pub fn with_serial_number(self, serial_number: Option<String>) -> Self {
+        Self { serial_number, ..self }
+    }
+
+    pub fn with_settle_delay(self, settle_delay: Duration) -> Self {
+        Self { settle_delay, ..self }
+    }
+
+    pub fn present(&self) -> bool {
+        matches!(self.find(), Ok(Some(_)))
+    }
+
+    fn find(&self) -> io::Result<Option<String>> {
+        Ok(serialport::available_ports()
             .map_err(io::Error::other)?
             .into_iter()
-            .find(|p| matches!(
-                p.port_type,
-                SerialPortType::UsbPort(UsbPortInfo { vid, pid, .. })
-                    if vid == self.target_vid && pid == self.target_pid
-            ))
+            .find(|p| match &p.port_type {
+                SerialPortType::UsbPort(UsbPortInfo { vid, pid, serial_number, .. }) => {
+                    *vid == self.target_vid
+                        && *pid == self.target_pid
+                        && self.serial_number.as_ref().is_none_or(|s| serial_number.as_ref() == Some(s))
+                }
+                _ => false,
+            })
+            .map(|p| p.port_name))
+    }
+
+    fn open(&self) -> io::Result<(String, Box<dyn SerialPort>)> {
+        let port_name = self
+            .find()?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no matching device"))?;
 
-        let port = serialport::new(&port_info.port_name, self.baud_rate)
+        let port = serialport::new(&port_name, self.baud_rate)
             .timeout(IO_TIMEOUT)
             .open()?;
         port.clear(ClearBuffer::All)?;
-        Ok((port_info.port_name, port))
+        Ok((port_name, port))
     }
 }
 
@@ -56,17 +81,18 @@ pub struct UsbPort {
     port: Option<Box<dyn SerialPort>>,
     last_attempt: Option<Instant>,
     last_error: Option<String>,
+    settling_until: Option<Instant>,
 }
 
 impl UsbPort {
     pub fn new(config: UsbPortConfig) -> Self {
-        let mut port = Self { config, port: None, last_attempt: None, last_error: None };
+        let mut port = Self { config, port: None, last_attempt: None, last_error: None, settling_until: None };
         port.reconnect();
         port
     }
 
     pub fn connected(&self) -> bool {
-        self.port.is_some()
+        self.port.is_some() && self.settling_until.is_none_or(|t| Instant::now() >= t)
     }
 
     pub fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
@@ -74,9 +100,32 @@ impl UsbPort {
         self.check(result)
     }
 
+    pub fn bytes_to_read(&mut self) -> io::Result<u32> {
+        let result = self.port()?.bytes_to_read().map_err(io::Error::from);
+        self.check(result)
+    }
+
+    pub fn release(&mut self) {
+        if self.port.take().is_some() {
+            eprintln!("USB {} released", self.label());
+        }
+        self.settling_until = None;
+        self.last_attempt = Some(Instant::now());
+    }
+
     fn port(&mut self) -> io::Result<&mut Box<dyn SerialPort>> {
         if self.port.is_none() && self.last_attempt.is_none_or(|t| t.elapsed() >= RECONNECT_PERIOD) {
             self.reconnect();
+        }
+        if self.settling_until.is_some_and(|t| Instant::now() < t) {
+            return Err(io::Error::from(io::ErrorKind::NotConnected));
+        }
+        if self.settling_until.take().is_some() {
+            let result = match self.port.as_mut() {
+                Some(port) => port.clear(ClearBuffer::All).map_err(io::Error::from),
+                None => Ok(()),
+            };
+            self.check(result)?;
         }
         self.port.as_mut().ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))
     }
@@ -88,6 +137,7 @@ impl UsbPort {
                 eprintln!("USB {} connected on {name}", self.label());
                 self.port = Some(port);
                 self.last_error = None;
+                self.settling_until = (!self.config.settle_delay.is_zero()).then(|| Instant::now() + self.config.settle_delay);
             }
             Err(e) => {
                 let error = e.to_string();
@@ -113,7 +163,10 @@ impl UsbPort {
     }
 
     fn label(&self) -> String {
-        format!("{:04x}:{:04x}", self.config.target_vid, self.config.target_pid)
+        match &self.config.serial_number {
+            Some(serial) => format!("{:04x}:{:04x} ({serial})", self.config.target_vid, self.config.target_pid),
+            None => format!("{:04x}:{:04x}", self.config.target_vid, self.config.target_pid),
+        }
     }
 }
 

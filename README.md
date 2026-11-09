@@ -1,5 +1,11 @@
 # Lucy Embedded Firmware
 
+[![CI: dev](https://github.com/Lucy-Robotics/lucy_embedded_firmware/actions/workflows/build.yml/badge.svg?branch=dev)](https://github.com/Lucy-Robotics/lucy_embedded_firmware/actions/workflows/build.yml?query=branch%3Adev)
+[![CI: master](https://github.com/Lucy-Robotics/lucy_embedded_firmware/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/Lucy-Robotics/lucy_embedded_firmware/actions/workflows/build.yml?query=branch%3Amaster)
+[![codecov](https://codecov.io/gh/Lucy-Robotics/lucy_embedded_firmware/branch/master/graph/badge.svg)](https://codecov.io/gh/Lucy-Robotics/lucy_embedded_firmware)
+[![license](https://img.shields.io/github/license/Lucy-Robotics/lucy_embedded_firmware)](LICENSE)
+[![Discord](https://img.shields.io/discord/1272611839775084564?label=Discord&logo=discord&logoColor=white&color=5865F2)](https://discord.com/invite/g4KNZ3eeBd)
+
 Rust firmware for Lucy RP2040 boards using **Modbus RTU over USB CDC**.
 
 ## Quick start (Pixi)
