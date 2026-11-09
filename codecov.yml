@@ -2,9 +2,7 @@ coverage:
   status:
     project:
       default:
-        # No verified baseline (coverage wasn't measured on this repo before);
-        # gate on "don't regress vs. the base branch" rather than a guessed
-        # fixed target. Replace with a real % floor once a few runs land.
+        # No baseline yet: gate on not regressing vs. base, not a guessed target.
         target: auto
         threshold: 1%
     patch:
