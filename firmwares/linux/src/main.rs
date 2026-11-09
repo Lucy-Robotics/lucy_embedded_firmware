@@ -7,6 +7,8 @@ use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
 
 mod resources;
 
+mod maintenance;
+
 mod board;
 use board::init;
 
