@@ -21,12 +21,20 @@ impl UsbPortConfig {
         }
     }
 
-    pub fn open(&self) -> Result<UsbPort, io::Error> {
-        let ports = serialport::available_ports().unwrap();
+    pub fn open(&self, serial: Option<&str>) -> Result<UsbPort, io::Error> {
+        let ports = serialport::available_ports()?;
 
         let matching_port = ports.into_iter().find(|p| {
-            if let SerialPortType::UsbPort(UsbPortInfo { vid, pid, .. }) = p.port_type {
-                vid == self.target_vid && pid == self.target_pid
+            if let SerialPortType::UsbPort(UsbPortInfo {
+                vid,
+                pid,
+                serial_number,
+                ..
+            }) = &p.port_type
+            {
+                *vid == self.target_vid
+                    && *pid == self.target_pid
+                    && serial.is_none_or(|s| serial_number.as_deref() == Some(s))
             } else {
                 false
             }
