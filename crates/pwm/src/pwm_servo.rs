@@ -135,9 +135,6 @@ mod tests {
 
     #[test]
     fn torque_enabled_maps_position() {
-        assert_eq!(
-            pulse_for(TorqueStatus::Enabled, PI / 2.0),
-            Some(1500)
-        );
+        assert_eq!(pulse_for(TorqueStatus::Enabled, PI / 2.0), Some(1500));
     }
 }
