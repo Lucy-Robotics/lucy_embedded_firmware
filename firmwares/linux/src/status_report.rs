@@ -105,13 +105,9 @@ pub(crate) fn status_json(
 mod tests {
     use super::*;
     use crate::config::get_robot;
-    use crate::usb_port::UsbPortConfig;
+    use crate::test_support::offline;
     use core::f32::consts::TAU;
     use std::time::Duration;
-
-    fn offline() -> Resources {
-        Resources::new(UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000))
-    }
 
     #[test]
     fn status_without_a_bus_never_claims_a_fresh_read() {

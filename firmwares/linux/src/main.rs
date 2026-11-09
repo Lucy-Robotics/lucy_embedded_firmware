@@ -18,6 +18,8 @@ mod config;
 mod maintenance;
 mod maintenance_handler;
 mod status_report;
+#[cfg(test)]
+mod test_support;
 mod usb_port;
 use config::{Telemetry, get_robot, robot_release, robot_tick};
 use maintenance_handler::handle_maintenance;
