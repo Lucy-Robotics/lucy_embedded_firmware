@@ -16,8 +16,11 @@ use board::init;
 
 mod config;
 mod maintenance;
+mod maintenance_handler;
+mod status_report;
 mod usb_port;
-use config::{Telemetry, get_robot, handle_maintenance, robot_release, robot_tick};
+use config::{Telemetry, get_robot, robot_release, robot_tick};
+use maintenance_handler::handle_maintenance;
 
 const SHM_OPEN_RETRY: Duration = Duration::from_millis(200);
 const SHM_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
