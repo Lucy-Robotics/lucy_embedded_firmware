@@ -7,23 +7,44 @@ use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
 
 mod resources;
 
-// Not wired into main() until the next PR in the stack lands the handler.
-#[allow(dead_code)]
 mod maintenance;
 
 mod board;
 use board::init;
 
 mod config;
+mod maintenance_handler;
+mod status_report;
 #[cfg(test)]
 mod test_support;
-use config::{get_robot, robot_release, robot_tick};
+mod usb_port;
+use config::{Telemetry, get_robot, robot_release, robot_tick};
+use maintenance_handler::handle_maintenance;
+
+/// Control ticks between looking for plugged or unplugged adapters (1 s).
+const ADAPTER_REFRESH_TICKS: u64 = 20;
 
 fn main() {
-    let mut ass = Shm::attach(&node_name());
+    let node = node_name();
+    let mut ass = Shm::attach(&node);
 
     let mut robot = get_robot();
     let mut board = init();
+    let mut telemetry = Telemetry::default();
+
+    // Control must keep working without it: only calibration needs this socket.
+    let socket = maintenance::socket_path(&node);
+    let mut maintenance_server = match maintenance::Server::bind(&socket) {
+        Ok(server) => Some(server),
+        Err(e) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "Warning: no maintenance socket at {}: {e}",
+                socket.display()
+            );
+            None
+        }
+    };
 
     install_stop_handler();
 
@@ -49,7 +70,11 @@ fn main() {
             last_command_seq = command_seq;
         }
 
-        robot_tick(tick_count, &mut robot, &mut board);
+        if tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
+            board.refresh();
+        }
+
+        robot_tick(tick_count, &mut robot, &mut board, &mut telemetry);
 
         ass.header().set_link_state(if board.connected() {
             LinkState::Connected
@@ -78,6 +103,10 @@ fn main() {
         ass.header()
             .state_seq
             .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+        if let Some(server) = maintenance_server.as_mut() {
+            server.poll(|request| handle_maintenance(request, &robot, &mut board, &telemetry));
+        }
 
         if stop_requested() {
             break;

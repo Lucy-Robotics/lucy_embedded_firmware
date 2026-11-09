@@ -82,6 +82,35 @@ impl UsbPortConfig {
     }
 }
 
+/// A connected USB serial device matching a vendor/product id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adapter {
+    pub port_name: String,
+    /// USB iSerial, absent on some clone adapters.
+    pub serial: Option<String>,
+}
+
+/// Every currently connected device matching `target_vid`/`target_pid`. Empty if the ports
+/// cannot be listed.
+pub fn list_adapters(target_vid: u16, target_pid: u16) -> Vec<Adapter> {
+    serialport::available_ports()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|port| match port.port_type {
+            SerialPortType::UsbPort(UsbPortInfo {
+                vid,
+                pid,
+                serial_number,
+                ..
+            }) if vid == target_vid && pid == target_pid => Some(Adapter {
+                port_name: port.port_name,
+                serial: serial_number,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 pub struct UsbPort {
     config: UsbPortConfig,
     port: Option<Box<dyn SerialPort>>,
