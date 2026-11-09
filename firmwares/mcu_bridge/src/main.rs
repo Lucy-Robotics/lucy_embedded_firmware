@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use memmap2::MmapMut;
 
-use libc;
 use lucy_embedded_firmware_communication::{
     Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
@@ -48,7 +47,7 @@ impl std::fmt::Display for ReplyError {
 fn read_commands<const N: usize>(shm: &SharedTable, n: usize) -> JointCommands<N> {
     loop {
         let before = shm.header().command_seq.load(Ordering::Acquire);
-        if before % 2 != 0 {
+        if !before.is_multiple_of(2) {
             std::hint::spin_loop();
             continue;
         }
