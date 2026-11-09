@@ -110,7 +110,7 @@ mod tests {
     }
 
     static CONFIG: PwmServoConfig = PwmServoConfig {
-        amplitude: PI as f32,
+        amplitude: PI,
         min_pulse: 500,
         max_pulse: 2500,
     };
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn torque_enabled_maps_position() {
         assert_eq!(
-            pulse_for(TorqueStatus::Enabled, PI as f32 / 2.0),
+            pulse_for(TorqueStatus::Enabled, PI / 2.0),
             Some(1500)
         );
     }
