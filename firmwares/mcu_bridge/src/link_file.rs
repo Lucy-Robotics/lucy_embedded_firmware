@@ -71,4 +71,28 @@ mod tests {
         link.record();
         assert!(!path.exists());
     }
+
+    #[test]
+    fn node_file_is_the_one_the_flash_pipeline_reads() {
+        assert_eq!(
+            LinkFile::for_node("left_arm").path,
+            PathBuf::from("/tmp/.lucy_mcu_bridge_link.left_arm")
+        );
+    }
+
+    #[test]
+    fn failed_write_is_retried_on_the_next_record() {
+        let dir = std::env::temp_dir().join(format!("lucy_link_retry_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("link");
+        let mut link = LinkFile::at(path.clone());
+
+        link.record();
+        assert!(!path.exists());
+
+        std::fs::create_dir(&dir).unwrap();
+        link.record();
+        assert!(path.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
