@@ -124,6 +124,11 @@ pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {
 
 pub const THERMAL_LIMITS: [ThermalLimit; JOINTS] = [ThermalLimit::new(65.0, 55.0); JOINTS];
 
+/// The VID/PID/baud rate of the USB-to-serial adapter this robot ships with.
+pub const USB_VID: u16 = 0x1a86;
+pub const USB_PID: u16 = 0x55d3;
+pub const USB_BAUD_RATE: u32 = 1_000_000;
+
 pub fn get_robot() -> LucyRobot {
     Robot::new(
         &JOINTS_CONFIG,

@@ -1,8 +1,9 @@
 use lucy_embedded_firmware_host::usb_port::{Adapter, UsbPortConfig};
 
-/// The VID/PID/baud rate of the USB-to-serial adapter this robot ships with.
+use crate::config::{USB_BAUD_RATE, USB_PID, USB_VID};
+
 pub(crate) fn lucy_usb_config() -> UsbPortConfig {
-    UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000)
+    UsbPortConfig::new(USB_VID, USB_PID, USB_BAUD_RATE)
 }
 
 /// Which adapter to drive, given what is connected and what was asked for.
