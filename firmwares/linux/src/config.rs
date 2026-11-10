@@ -2,7 +2,7 @@ use lucy_embedded_firmware_core::joint::*;
 use lucy_embedded_firmware_core::robot::Robot;
 
 use lucy_embedded_firmware_feetech::feetech::{
-    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
+    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig, PositionGains,
 };
 use lucy_embedded_firmware_security::limits::PositionLimitGuard;
 use lucy_embedded_firmware_security::thermal::{ThermalGuard, ThermalLimit};
@@ -183,6 +183,25 @@ pub fn robot_release(resources: &mut Resources) {
             "Warning: torque off failed, the servos may still hold"
         );
     }
+}
+
+const EEPROM_WRITE_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+pub fn set_position_gains(resources: &mut Resources) -> bool {
+    let Some(usb) = resources.usb0.as_mut() else {
+        return false;
+    };
+    let sleep = &mut || std::thread::sleep(EEPROM_WRITE_DELAY);
+    let sent = driver()
+        .set_position_gains(usb, PositionGains::SO101, sleep)
+        .is_ok();
+    if !sent {
+        let _ = writeln!(
+            std::io::stderr(),
+            "Warning: position gains not sent, retrying"
+        );
+    }
+    sent
 }
 
 pub(crate) fn driver() -> FeetechBusDriver<UsbPort, 6> {
