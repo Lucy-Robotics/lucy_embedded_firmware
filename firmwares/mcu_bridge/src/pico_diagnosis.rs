@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use serialport::{SerialPortType, UsbPortInfo};
+use serialport::{SerialPortInfo, SerialPortType, UsbPortInfo};
 
 const PICO_VID: u16 = 0x2e8a;
 const PICO_PID: u16 = 0x0003;
@@ -21,7 +21,9 @@ struct UsbSnapshot {
 
 /// Why no Pico/Servo2040 answers: BOOTSEL, another board's serial, or nothing plugged in.
 pub fn not_found_reason(expected_serial: &str) -> String {
-    diagnose(expected_serial, &UsbSnapshot::capture())
+    let ports = serialport::available_ports().unwrap_or_default();
+    let snap = UsbSnapshot::capture(ports, Path::new("/sys/bus/usb/devices"));
+    diagnose(expected_serial, &snap)
 }
 
 fn diagnose(expected_serial: &str, snap: &UsbSnapshot) -> String {
@@ -65,12 +67,12 @@ fn diagnose(expected_serial: &str, snap: &UsbSnapshot) -> String {
 }
 
 impl UsbSnapshot {
-    fn capture() -> Self {
+    fn capture(ports: Vec<SerialPortInfo>, sysfs: &Path) -> Self {
         let mut snap = Self {
-            cdc_serials: list_cdc_serials(),
+            cdc_serials: cdc_serials(ports),
             ..Self::default()
         };
-        for hint in list_sysfs_pico_devices() {
+        for hint in sysfs_pico_devices(sysfs) {
             let product = hint.product.to_ascii_lowercase();
             if product.contains("rp2 boot") || product.contains("bootsel") {
                 snap.bootsel.push(hint);
@@ -82,9 +84,8 @@ impl UsbSnapshot {
     }
 }
 
-fn list_cdc_serials() -> Vec<String> {
-    let mut out: Vec<String> = serialport::available_ports()
-        .unwrap_or_default()
+fn cdc_serials(ports: Vec<SerialPortInfo>) -> Vec<String> {
+    let mut out: Vec<String> = ports
         .into_iter()
         .filter_map(|port| match port.port_type {
             SerialPortType::UsbPort(UsbPortInfo {
@@ -101,8 +102,8 @@ fn list_cdc_serials() -> Vec<String> {
     out
 }
 
-fn list_sysfs_pico_devices() -> Vec<UsbDeviceHint> {
-    let Ok(entries) = fs::read_dir(Path::new("/sys/bus/usb/devices")) else {
+fn sysfs_pico_devices(sysfs: &Path) -> Vec<UsbDeviceHint> {
+    let Ok(entries) = fs::read_dir(sysfs) else {
         return Vec::new();
     };
     let want = format!("{PICO_VID:04x}");
@@ -124,46 +125,5 @@ fn list_sysfs_pico_devices() -> Vec<UsbDeviceHint> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{UsbDeviceHint, UsbSnapshot, diagnose};
-
-    #[test]
-    fn bootsel_board_is_told_to_flash_the_uf2() {
-        let snap = UsbSnapshot {
-            bootsel: vec![UsbDeviceHint {
-                serial: "E0C9125B0D9B".into(),
-                product: "RP2 Boot".into(),
-            }],
-            ..UsbSnapshot::default()
-        };
-        let msg = diagnose("E6617C93E3858429", &snap);
-        assert!(msg.starts_with("not found"), "{msg}");
-        assert!(msg.contains("BOOTSEL"), "{msg}");
-        assert!(msg.contains("RP2 Boot"), "{msg}");
-        assert!(msg.contains("Flash the UF2"), "{msg}");
-        assert!(msg.contains("E6617C93E3858429"), "{msg}");
-    }
-
-    #[test]
-    fn wrong_serial_lists_the_boards_seen() {
-        let snap = UsbSnapshot {
-            cdc_serials: vec!["OTHERBOARD".into()],
-            ..UsbSnapshot::default()
-        };
-        let msg = diagnose("E6617C93E3858429", &snap);
-        assert!(
-            msg.contains("serial_id=E6617C93E3858429 is not on USB"),
-            "{msg}"
-        );
-        assert!(msg.contains("OTHERBOARD"), "{msg}");
-    }
-
-    #[test]
-    fn nothing_plugged_in_names_the_wanted_serial() {
-        let msg = diagnose("E6617C93E3858429", &UsbSnapshot::default());
-        assert_eq!(
-            msg,
-            "not found: no Pico/Servo2040 on USB (want serial_id=E6617C93E3858429)"
-        );
-    }
-}
+#[path = "pico_diagnosis_tests.rs"]
+mod tests;
