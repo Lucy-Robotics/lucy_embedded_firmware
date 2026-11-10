@@ -12,3 +12,4 @@ lucy-embedded-firmware-core = { path = "../../crates/core" }
 lucy-embedded-firmware-serial = { path = "../../crates/serial" }
 lucy-embedded-firmware-communication = { path = "../../crates/communication" }
 lucy-embedded-firmware-host = { path = "../../crates/host" }
+serialport = "4.10.0"

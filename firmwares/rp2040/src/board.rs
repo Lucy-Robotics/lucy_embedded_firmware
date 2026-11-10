@@ -2,24 +2,9 @@ use crate::i2c_bank::I2cBank;
 use crate::ws2812::QWs2812;
 use core::option::Option;
 
-use rp2040_hal::pio::PIOExt;
-use rp2040_hal::{
-    gpio,
-    pac,
-    clocks,
-    usb,
-    pio,
-    pwm,
-    I2C,
-
-    Sio,
-    Timer,
-    Clock,
-    Watchdog,
-};
 use rp2040_hal::fugit::RateExtU32;
 use rp2040_hal::pio::PIOExt;
-use rp2040_hal::{Clock, Sio, Timer, Watchdog, clocks, gpio, pac, pio, pwm, uart, usb};
+use rp2040_hal::{Clock, I2C, Sio, Timer, Watchdog, clocks, gpio, pac, pio, pwm, usb};
 
 use crate::headers::KeptPins;
 
@@ -36,7 +21,14 @@ pub struct Resources {
     pub usb_bus: Option<usb::UsbBus>,
     pub timer: Timer,
     pub delay: cortex_m::delay::Delay,
-    pub ws: Option<QWs2812<pac::PIO0, pio::SM0, gpio::Pin<gpio::bank0::Gpio18, gpio::FunctionPio0, gpio::PullDown>, 6>>,
+    pub ws: Option<
+        QWs2812<
+            pac::PIO0,
+            pio::SM0,
+            gpio::Pin<gpio::bank0::Gpio18, gpio::FunctionPio0, gpio::PullDown>,
+            6,
+        >,
+    >,
     pub slices: pwm::Slices,
     pub i2c: Option<I2cBank<ServoI2c>>,
 }
@@ -74,10 +66,13 @@ pub fn init() -> Resources {
     let ws2812 = QWs2812::new(
         kept.gpio18.into_function(),
         &mut pio,
-        sm0, clocks.peripheral_clock.freq(), timer.count_down());
+        sm0,
+        clocks.peripheral_clock.freq(),
+        timer.count_down(),
+    );
     let i2c = if crate::i2c_bank::rows().is_empty() {
-        drop(kept.gpio20);
-        drop(kept.gpio21);
+        let _ = kept.gpio20;
+        let _ = kept.gpio21;
         None
     } else {
         let sda = kept.gpio20.into_pull_up_input().into_function();

@@ -3,11 +3,11 @@
 use embedded_hal::i2c::I2c;
 use lucy_embedded_firmware_core::joint::{Command, TorqueStatus};
 use lucy_embedded_firmware_pwm::pca9685::{
-    channel_base, channel_bytes, sleep_config_writes, wake_write, WAKE_DELAY_US,
+    WAKE_DELAY_US, channel_base, channel_bytes, sleep_config_writes, wake_write,
 };
 use lucy_embedded_firmware_pwm::pulse::pulse_width_us;
 
-use crate::table::{I2cRow, I2C_ROWS};
+use crate::table::{I2C_ROWS, I2cRow};
 
 pub fn rows() -> &'static [I2cRow] {
     I2C_ROWS
@@ -51,7 +51,12 @@ impl<I: I2c> I2cBank<I> {
             let command = commands.get(row.virtual_pin).copied().unwrap_or_default();
             let torque = command.torque_enabled == TorqueStatus::Enabled;
             let pulse = if torque {
-                pulse_width_us(command.position, row.amplitude, row.min_pulse, row.max_pulse)
+                pulse_width_us(
+                    command.position,
+                    row.amplitude,
+                    row.min_pulse,
+                    row.max_pulse,
+                )
             } else {
                 0
             };
@@ -63,10 +68,8 @@ impl<I: I2c> I2cBank<I> {
             payload[0] = channel_base(row.channel);
             payload[1..].copy_from_slice(&channel_bytes(pulse, torque));
             // Only cache on success so a dropped write is retried next tick.
-            if self.bus.write(row.address, &payload).is_ok() {
-                if row.virtual_pin < self.last.len() {
-                    self.last[row.virtual_pin] = signature;
-                }
+            if self.bus.write(row.address, &payload).is_ok() && row.virtual_pin < self.last.len() {
+                self.last[row.virtual_pin] = signature;
             }
         }
     }

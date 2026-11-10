@@ -14,18 +14,29 @@ impl LinkFile {
     }
 
     pub fn at(path: PathBuf) -> Self {
-        Self { path, last_write: None }
+        Self {
+            path,
+            last_write: None,
+        }
     }
 
     pub fn record(&mut self) {
         let now = Instant::now();
-        if self.last_write.is_some_and(|last| now - last < MIN_INTERVAL) {
+        if self
+            .last_write
+            .is_some_and(|last| now - last < MIN_INTERVAL)
+        {
             return;
         }
-        let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         match std::fs::write(&self.path, format!("{:.3}\n", unix.as_secs_f64())) {
             Ok(()) => self.last_write = Some(now),
-            Err(err) => eprintln!("Could not record the serial link in {}: {err}", self.path.display()),
+            Err(err) => eprintln!(
+                "Could not record the serial link in {}: {err}",
+                self.path.display()
+            ),
         }
     }
 }
@@ -35,14 +46,21 @@ mod tests {
     use super::*;
 
     fn stamp(path: &PathBuf) -> f64 {
-        std::fs::read_to_string(path).unwrap().trim().parse().unwrap()
+        std::fs::read_to_string(path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     #[test]
     fn records_the_unix_time_then_throttles() {
         let path = std::env::temp_dir().join(format!("lucy_link_test_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
 
         let mut link = LinkFile::at(path.clone());
         link.record();

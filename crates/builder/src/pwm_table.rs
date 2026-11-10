@@ -52,15 +52,13 @@ pub fn render_static_table(yaml: &str) -> String {
                  got a hardware mapping with actuators:"
             );
         }
-        serde_yaml::from_str(yaml).unwrap_or_else(|err| {
-            panic!("invalid firmware spec YAML: {err}")
-        })
+        serde_yaml::from_str(yaml).unwrap_or_else(|err| panic!("invalid firmware spec YAML: {err}"))
     };
     let mut out = String::from(
         "#[derive(Clone, Copy)]\n\
-         pub struct PwmRow { pub virtual_pin: usize, pub gpio: u8, pub amplitude: f64, pub min_pulse: u16, pub max_pulse: u16 }\n\
+         pub struct PwmRow { pub virtual_pin: usize, pub gpio: u8, pub amplitude: f32, pub min_pulse: u16, pub max_pulse: u16 }\n\
          #[derive(Clone, Copy)]\n\
-         pub struct I2cRow { pub virtual_pin: usize, pub address: u8, pub channel: u8, pub amplitude: f64, pub min_pulse: u16, pub max_pulse: u16 }\n",
+         pub struct I2cRow { pub virtual_pin: usize, pub address: u8, pub channel: u8, pub amplitude: f32, pub min_pulse: u16, pub max_pulse: u16 }\n",
     );
     out.push_str("pub static PWM_ROWS: &[PwmRow] = &[\n");
     for row in &spec.pwm {
