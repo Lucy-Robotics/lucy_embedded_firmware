@@ -1,4 +1,3 @@
-use lucy_embedded_firmware_core::actuator::ActuatorGroup;
 use lucy_embedded_firmware_core::joint::*;
 use lucy_embedded_firmware_core::robot::Robot;
 
@@ -13,6 +12,7 @@ use lucy_embedded_firmware_host::usb_port::UsbPort;
 
 use core::f32::consts::{PI, TAU};
 use std::io::Write;
+use std::time::Instant;
 
 pub const JOINTS: usize = 6;
 
@@ -124,6 +124,11 @@ pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {
 
 pub const THERMAL_LIMITS: [ThermalLimit; JOINTS] = [ThermalLimit::new(65.0, 55.0); JOINTS];
 
+/// The VID/PID/baud rate of the USB-to-serial adapter this robot ships with.
+pub const USB_VID: u16 = 0x1a86;
+pub const USB_PID: u16 = 0x55d3;
+pub const USB_BAUD_RATE: u32 = 1_000_000;
+
 pub fn get_robot() -> LucyRobot {
     Robot::new(
         &JOINTS_CONFIG,
@@ -134,24 +139,43 @@ pub fn get_robot() -> LucyRobot {
     )
 }
 
-pub fn robot_tick(tick: u64, robot: &mut LucyRobot, resources: &mut Resources) {
-    let _ = robot.tick(|command, state| {
-        driver().update(
-            tick,
-            &mut resources.usb0,
-            &mut command[0..6],
-            &mut state[0..6],
-        )
+/// When each servo last answered a position read. The bus result alone can't say which one failed,
+/// and the SHM state counter advances regardless.
+#[derive(Default)]
+pub struct Telemetry {
+    pub last_seen: [Option<Instant>; 6],
+}
+
+pub fn robot_tick(
+    tick: u64,
+    robot: &mut LucyRobot,
+    resources: &mut Resources,
+    telemetry: &mut Telemetry,
+) {
+    let Some(usb) = resources.usb0.as_mut() else {
+        return;
+    };
+    let seen = robot.tick(|command, state| {
+        let mut seen = [false; 6];
+        let _ = driver().update_tracked(tick, usb, &mut command[0..6], &mut state[0..6], &mut seen);
+        seen
     });
+    let now = Instant::now();
+    for (last, seen) in telemetry.last_seen.iter_mut().zip(seen) {
+        if seen {
+            *last = Some(now);
+        }
+    }
 }
 
 pub fn robot_release(resources: &mut Resources) {
+    let Some(usb) = resources.usb0.as_mut() else {
+        return;
+    };
     let mut driver = driver();
     let mut ok = false;
     for _ in 0..2 {
-        ok |= driver
-            .set_torque(&mut resources.usb0, &[Command::default(); 6])
-            .is_ok();
+        ok |= driver.set_torque(usb, &[Command::default(); 6]).is_ok();
     }
     if !ok {
         let _ = writeln!(
@@ -161,6 +185,6 @@ pub fn robot_release(resources: &mut Resources) {
     }
 }
 
-fn driver() -> FeetechBusDriver<UsbPort, 6> {
+pub(crate) fn driver() -> FeetechBusDriver<UsbPort, 6> {
     FeetechBusDriver::new(&FEETECH_0)
 }

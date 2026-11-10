@@ -28,6 +28,10 @@ impl<const M: usize, G: Guard> Robot<M, G> {
         result
     }
 
+    pub fn commands(&self) -> &[Command; M] {
+        &self.joints_command
+    }
+
     pub fn commands_mut(&mut self) -> &mut [Command; M] {
         &mut self.joints_command
     }

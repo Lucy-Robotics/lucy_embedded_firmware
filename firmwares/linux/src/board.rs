@@ -1,9 +1,9 @@
 use crate::resources::Resources;
-use lucy_embedded_firmware_host::usb_port::{UsbPort, UsbPortConfig};
+use crate::usb_port::lucy_usb_config;
 
+/// Never fails: with no adapter yet, the maintenance socket still reports why.
 pub fn init() -> Resources {
-    let cfg = UsbPortConfig::new(0x1a86, 0x55d3, 1_000_000);
-    Resources {
-        usb0: UsbPort::new(cfg),
-    }
+    let mut resources = Resources::new(lucy_usb_config());
+    resources.refresh();
+    resources
 }
