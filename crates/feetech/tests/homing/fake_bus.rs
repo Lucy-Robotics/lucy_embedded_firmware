@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use lucy_embedded_firmware_feetech::feetech::MAX_TICK;
 use lucy_embedded_firmware_feetech::feetech::decode_homing_offset;
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 pub(crate) const REG_MIN: u8 = 9;
 pub(crate) const REG_MAX: u8 = 11;

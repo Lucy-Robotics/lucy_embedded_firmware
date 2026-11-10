@@ -1,9 +1,9 @@
-use crate::pwm_channel::PwmChannel;
 use core::f32::consts::PI;
 use core::marker::PhantomData;
 use lucy_embedded_firmware_core::actuator::ActuatorGroup;
 use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
 use lucy_embedded_firmware_core::utils::map_range;
+use lucy_embedded_firmware_pwm::PwmChannel;
 
 pub enum PwmServoError {
     CommunicationError,

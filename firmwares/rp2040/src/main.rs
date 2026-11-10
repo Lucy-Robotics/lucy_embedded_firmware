@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use lucy_embedded_firmware_core::guard::Guard;
 use lucy_embedded_firmware_core::joint::TorqueStatus;
 use lucy_embedded_firmware_core::robot::Robot;
 
@@ -97,11 +98,9 @@ fn read_commands<B: usb_device::bus::UsbBus>(
     last_seq
 }
 
-fn apply_commands<const N: usize>(robot: &mut Robot<N>, commands: &JointCommands<N>) {
-    for i in 0..N {
-        let position = robot.clamp_position(i, commands.positions[i]);
-        let joint = &mut robot.joints_command[i];
-        joint.position = position;
+fn apply_commands<const N: usize, G: Guard>(robot: &mut Robot<N, G>, commands: &JointCommands<N>) {
+    for (i, joint) in robot.commands_mut().iter_mut().enumerate() {
+        joint.position = commands.positions[i];
         joint.velocity = commands.velocities[i];
         joint.acceleration = commands.accelerations[i];
         joint.torque_enabled = if commands.torque_enabled[i] {
@@ -112,19 +111,14 @@ fn apply_commands<const N: usize>(robot: &mut Robot<N>, commands: &JointCommands
     }
 }
 
-fn disable_torque<const N: usize>(robot: &mut Robot<N>) {
-    for joint in robot.joints_command.iter_mut() {
-        joint.torque_enabled = TorqueStatus::Disabled;
-    }
-}
-
-fn collect_states<const N: usize>(robot: &Robot<N>) -> JointStates<N> {
+fn collect_states<const N: usize, G: Guard>(robot: &Robot<N, G>) -> JointStates<N> {
+    let states = robot.states();
     JointStates {
-        positions: robot.joints_state.map(|joint| joint.position),
-        temperatures: robot.joints_state.map(|joint| joint.temperature),
-        efforts: robot.joints_state.map(|joint| joint.effort),
-        currents: robot.joints_state.map(|joint| joint.current),
-        loads: robot.joints_state.map(|joint| joint.load),
+        positions: states.map(|joint| joint.position),
+        temperatures: states.map(|joint| joint.temperature),
+        efforts: states.map(|joint| joint.effort),
+        currents: states.map(|joint| joint.current),
+        loads: states.map(|joint| joint.load),
     }
 }
 
@@ -185,6 +179,11 @@ fn main() -> ! {
         let tick_start = resources.timer.get_counter().ticks();
         usb_dev.poll(&mut [&mut serial, &mut reset]);
 
+        if usb_dev.state() != UsbDeviceState::Configured {
+            last_command_tick = None;
+            pending_reply = None;
+        }
+
         if let Some(seq) = read_commands(&mut serial, &mut decoder, &mut commands) {
             pending_reply = Some(seq);
             last_command_tick = Some(tick_start);
@@ -196,7 +195,7 @@ fn main() -> ! {
             None => true,
         };
         if timed_out {
-            disable_torque(&mut robot);
+            robot.disable_torque();
         }
 
         if !robot_tick(tick_count, &mut robot, &mut resources) {
@@ -218,6 +217,8 @@ fn main() -> ! {
             let bus_error = last_error_tick != 0 && led_tick - last_error_tick < 1_000_000;
             let color = if bus_error {
                 RGB8::new(level, 0, 0)
+            } else if robot.faulted() {
+                RGB8::new(level, level / 3, 0)
             } else {
                 RGB8::new(0, level, 0)
             };

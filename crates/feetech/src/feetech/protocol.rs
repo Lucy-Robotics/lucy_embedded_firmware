@@ -1,5 +1,5 @@
 use super::driver::{FeetechBusConfig, FeetechBusError};
-use crate::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 pub(super) const SYNC_READ: u8 = 0x82;
 pub(super) const SYNC_WRITE: u8 = 0x83;

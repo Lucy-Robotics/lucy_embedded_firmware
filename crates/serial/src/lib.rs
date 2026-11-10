@@ -1,4 +1,4 @@
-use core::result::Result;
+#![no_std]
 
 pub trait SerialChannel {
     type Error;

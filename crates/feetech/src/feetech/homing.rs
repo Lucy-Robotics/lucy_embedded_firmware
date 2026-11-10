@@ -7,7 +7,7 @@
 use super::driver::{FeetechBusDriver, FeetechBusError};
 use super::protocol::read_replies;
 use super::read::REG_PRESENT_POSITION;
-use crate::serial_channel::SerialChannel;
+use lucy_embedded_firmware_serial::SerialChannel;
 
 const REG_MIN_POSITION_LIMIT: u8 = 0x09;
 const REG_MAX_POSITION_LIMIT: u8 = 0x0B;

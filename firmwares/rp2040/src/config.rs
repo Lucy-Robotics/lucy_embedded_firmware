@@ -5,6 +5,8 @@ use lucy_embedded_firmware_core::robot::Robot;
 use lucy_embedded_firmware_feetech::feetech::{
     FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
 };
+use lucy_embedded_firmware_security::limits::PositionLimitGuard;
+use lucy_embedded_firmware_security::thermal::{ThermalGuard, ThermalLimit};
 
 use crate::board::Resources;
 use crate::board::Uart0Channel;
@@ -12,6 +14,8 @@ use crate::board::Uart0Channel;
 use core::f32::consts::{PI, TAU};
 
 pub const JOINTS: usize = 6;
+
+pub type LucyRobot = Robot<JOINTS, (ThermalGuard<JOINTS>, PositionLimitGuard<JOINTS>)>;
 
 pub const JOINTS_CONFIG: [CommandConfig; JOINTS] = [
     CommandConfig {
@@ -117,22 +121,28 @@ pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {
     ],
 };
 
-pub fn get_robot() -> Robot<JOINTS> {
-    Robot {
-        joints_config: &JOINTS_CONFIG,
-        joints_command: [Command::default(); JOINTS],
-        joints_state: [State::default(); JOINTS],
-    }
+pub const THERMAL_LIMITS: [ThermalLimit; JOINTS] = [ThermalLimit::new(65.0, 55.0); JOINTS];
+
+pub fn get_robot() -> LucyRobot {
+    Robot::new(
+        &JOINTS_CONFIG,
+        (
+            ThermalGuard::new(&THERMAL_LIMITS),
+            PositionLimitGuard::new(&JOINTS_CONFIG),
+        ),
+    )
 }
 
-pub fn robot_tick(tick: u64, robot: &mut Robot<JOINTS>, resources: &mut Resources) -> bool {
+pub fn robot_tick(tick: u64, robot: &mut LucyRobot, resources: &mut Resources) -> bool {
     let mut driver = FeetechBusDriver::<Uart0Channel, 6>::new(&FEETECH_0);
-    driver
-        .update(
-            tick,
-            &mut resources.uart0,
-            &mut robot.joints_command[0..6],
-            &mut robot.joints_state[0..6],
-        )
-        .is_ok()
+    robot.tick(|command, state| {
+        driver
+            .update(
+                tick,
+                &mut resources.uart0,
+                &mut command[0..6],
+                &mut state[0..6],
+            )
+            .is_ok()
+    })
 }
