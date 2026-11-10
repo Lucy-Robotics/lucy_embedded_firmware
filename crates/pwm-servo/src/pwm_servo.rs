@@ -1,20 +1,16 @@
-use crate::pulse::pulse_width_us;
-use crate::pwm_channel::PwmChannel;
-use lucy_embedded_firmware_core::actuator::{ActuatorGroup};
-use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
 use core::f32::consts::PI;
 use core::marker::PhantomData;
 use lucy_embedded_firmware_core::actuator::ActuatorGroup;
 use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
-use lucy_embedded_firmware_core::utils::map_range;
 use lucy_embedded_firmware_pwm::PwmChannel;
+use lucy_embedded_firmware_pwm::pulse::pulse_width_us;
 
 pub enum PwmServoError {
     CommunicationError,
 }
 
 pub struct PwmServoConfig {
-    pub amplitude: f64,
+    pub amplitude: f32,
     pub min_pulse: u16,
     pub max_pulse: u16,
 }
@@ -22,7 +18,7 @@ pub struct PwmServoConfig {
 impl Default for PwmServoConfig {
     fn default() -> Self {
         PwmServoConfig {
-            amplitude: PI as f64,
+            amplitude: PI,
             min_pulse: 500,
             max_pulse: 2500,
         }

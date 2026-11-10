@@ -2,42 +2,41 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use memmap2::MmapMut;
-
-use lucy_embedded_firmware_core::data::{SharedTable, ShmHeader};
 use lucy_embedded_firmware_communication::{
     Body, Error as FrameError, Frame, FrameDecoder, JointCommands, JointStates, encode, frame_len,
 };
-use lucy_embedded_firmware_feetech::serial_channel::SerialChannel;
-use libc;
-use std::ffi::CString;
-use std::os::fd::FromRawFd;
+use lucy_embedded_firmware_core::data::{LinkState, SharedTable};
+use lucy_embedded_firmware_host::shm::{Shm, node_name};
+use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
+use lucy_embedded_firmware_host::usb_port::{ClearBuffer, UsbPort, UsbPortConfig};
+use lucy_embedded_firmware_serial::SerialChannel;
 
 mod link_file;
-mod usb_port;
+mod pico_diagnosis;
 use link_file::LinkFile;
-use usb_port::{UsbPort, UsbPortConfig};
 
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
 const RP2040_JOINTS: usize = 32;
 
-fn die(message: impl std::fmt::Display) -> ! {
-    let message = message.to_string();
-    eprintln!("{message}");
-    // The launcher TUI reads these when the Real Hardware row is CRASHED.
-    let _ = std::fs::write("/tmp/.lucy_real_hardware_status", "1\n");
-    let _ = std::fs::write("/tmp/.lucy_real_hardware_error", &message);
-    std::process::exit(1);
-}
-
-/// A Mega replies within ~10 ms; past this the tick is dropped and the next one resends.
 const REPLY_TIMEOUT: Duration = Duration::from_millis(60);
+const LINK_TIMEOUT: Duration = Duration::from_millis(200);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Board {
     Rp2040,
-    /// Links its joints plus one PCA9685 status slot (see `pca_changes`).
     Mega,
+}
+
+impl Board {
+    fn port_config(self, serial: Option<&str>) -> UsbPortConfig {
+        let (vid, pid) = match self {
+            Board::Rp2040 => (0x2e8a, 0x0003),
+            Board::Mega => (0x2341, 0x0042),
+        };
+        UsbPortConfig::new(vid, pid, 1_000_000)
+            .with_clear_buffer(ClearBuffer::All)
+            .with_serial_number(serial.map(str::to_string))
+    }
 }
 
 enum ReplyError {
@@ -51,9 +50,10 @@ impl std::fmt::Display for ReplyError {
         match self {
             ReplyError::Timeout => write!(f, "no reply within {REPLY_TIMEOUT:?}"),
             ReplyError::Io(e) => write!(f, "io error ({:?}): {e}", e.kind()),
-            // Bytes *did* arrive up to a 0x00 delimiter, but they don't decode to a frame:
-            // framing/corruption on the wire, not a dead link.
-            ReplyError::Corrupt(e) => write!(f, "corrupt frame ({e}); reflash the board if its firmware is older than this mcu_bridge"),
+            ReplyError::Corrupt(e) => write!(
+                f,
+                "corrupt frame ({e}); reflash the board if its firmware is older than this mcu_bridge"
+            ),
         }
     }
 }
@@ -111,7 +111,11 @@ fn wait_reply<const N: usize>(
         };
         for &byte in &buf[..count] {
             match decoder.push_byte(byte) {
-                Some(Ok(Frame { seq: s, body: Body::State(states), .. })) if s == seq => return Ok(states),
+                Some(Ok(Frame {
+                    seq: s,
+                    body: Body::State(states),
+                    ..
+                })) if s == seq => return Ok(states),
                 Some(Ok(_)) | None => {}
                 Some(Err(e)) => corrupt = Some(e),
             }
@@ -120,15 +124,6 @@ fn wait_reply<const N: usize>(
     Err(corrupt.map_or(ReplyError::Timeout, ReplyError::Corrupt))
 }
 
-fn node_name() -> String {
-    std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("LUCY_NODE_NAME").ok())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "lucy".to_string())
-}
-
-/// USB serial number of the board to drive (its `serial_id`); unset = first board found.
 fn usb_serial() -> Option<String> {
     std::env::args()
         .nth(2)
@@ -136,19 +131,18 @@ fn usb_serial() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// PCA9685 addresses of a Mega board (`0x41,0x40`), in its `pca_addresses` order.
 fn parse_pca_addresses(arg: &str) -> Vec<u8> {
     arg.split(',')
         .filter_map(|a| {
             let a = a.trim();
-            a.strip_prefix("0x").map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
+            a.strip_prefix("0x")
+                .map_or_else(|| a.parse().ok(), |h| u8::from_str_radix(h, 16).ok())
         })
         .collect()
 }
 
-/// The Mega firmware reports its PCA9685s in the last link slot as `0x100 | missing bits`
-/// (bit i = `addresses[i]`). Returns a line for every chip the first time, then per change.
-fn pca_changes(addresses: &[u8], slot: f64, last: &mut Option<u8>) -> Vec<String> {
+/// Slot is `0x100 | missing bits`
+fn pca_changes(addresses: &[u8], slot: f32, last: &mut Option<u8>) -> Vec<String> {
     let value = slot as u16;
     if addresses.is_empty() || value & 0x100 == 0 {
         return Vec::new();
@@ -170,90 +164,45 @@ fn pca_changes(addresses: &[u8], slot: f64, last: &mut Option<u8>) -> Vec<String
     lines
 }
 
-/// No states frame for this long means the board is on USB but not answering (frozen, or
-/// still in its bootloader); it covers a normal reboot after connecting.
 const SILENT_AFTER: Duration = Duration::from_secs(3);
 
 const RETRY: Duration = Duration::from_secs(1);
 
 const BOOTLOADER_TIMEOUT: Duration = Duration::from_millis(1500);
 
-/// Flashers (config pipeline, `pixi run firmware-flash-mega`) hold this file while avrdude
-/// owns the port: the bridge must not touch the board then.
-fn flash_lock(serial: Option<&str>) -> Option<std::path::PathBuf> {
-    serial.map(|s| std::path::PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
+const MEGA_RESET: Duration = Duration::from_secs(2);
+
+/// Held by flashers while avrdude owns the port
+fn flash_lock(serial: Option<&str>) -> Option<PathBuf> {
+    serial.map(|s| PathBuf::from(format!("/tmp/.lucy_mcu_flashing_{s}")))
 }
 
-fn try_open_shm(name: &str, min_len: usize) -> Result<File, String> {
-    let c_name = CString::new(name).expect("shm name contains a NUL byte");
-    let fd = unsafe { libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0o666 as libc::c_uint) };
-    if fd == -1 {
-        return Err(format!("shm_open: {}", std::io::Error::last_os_error()));
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
-    let len = file.metadata().map_err(|e| format!("stat: {e}"))?.len() as usize;
-    if len < min_len {
-        return Err(format!("{len} bytes, expected at least {min_len}"));
-    }
-    Ok(file)
-}
-
-/// The hardware interface creates the table once the control stack is up: wait for it.
-fn attach_shm(name: &str, min_len: usize) -> File {
-    let mut waiting = false;
-    loop {
-        match try_open_shm(name, min_len) {
-            Ok(file) => return file,
-            Err(e) if !waiting => {
-                println!("Waiting for the control stack's shared memory {name} ({e})");
-                waiting = true;
-            }
-            Err(_) => {}
-        }
-        std::thread::sleep(RETRY);
-    }
-}
-
-fn pico_config(serial: Option<&str>) -> UsbPortConfig {
-    UsbPortConfig::new(usb_port::PICO_VID, usb_port::PICO_PID, 1_000_000, serial.unwrap_or_default())
-}
-
-/// RP2040 first, else Arduino Mega 2560.
-fn open_board(serial: Option<&str>) -> std::io::Result<(UsbPort, Board)> {
-    pico_config(serial)
-        .open()
-        .map(|port| (port, Board::Rp2040))
-        .or_else(|e| {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                return Err(e);
-            }
-            let mut port = UsbPortConfig::new(0x2341, 0x0042, 1_000_000, serial.unwrap_or_default()).open()?;
-            // Opening resets the Mega; bytes sent while its bootloader runs keep it from
-            // ever starting the firmware, so wait it out before the first frame.
-            std::thread::sleep(Duration::from_secs(2));
-            port.clear()?;
-            Ok((port, Board::Mega))
-        })
-}
-
-/// Open the board, waiting (one message per state) while it is unplugged or being flashed.
-fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Board) {
+fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)> {
     let label = serial.unwrap_or("(first found)");
-    let mut said: Option<String> = None;
-    loop {
+    let mut said = None;
+    while !stop_requested() {
         let state = if lock.is_some_and(|l| l.exists()) {
-            "being flashed.".to_string()
+            "is being flashed".to_string()
         } else {
-            match open_board(serial) {
-                Ok(board) => {
-                    println!("Board {label} connected");
-                    return board;
+            match [Board::Rp2040, Board::Mega]
+                .into_iter()
+                .find(|b| b.port_config(serial).present())
+            {
+                Some(board) => {
+                    println!("Board {label} found");
+                    let mut port = UsbPort::new(board.port_config(serial));
+                    // Opening resets the Mega: wait out its bootloader
+                    if board == Board::Mega && port.connected() {
+                        std::thread::sleep(MEGA_RESET);
+                        let _ = port.clear();
+                    }
+                    return Some((port, board));
                 }
-                Err(e) => usb_port::diagnose_open_failure(&pico_config(serial), label, &e),
+                None => pico_diagnosis::not_found_reason(serial.unwrap_or_default()),
             }
         };
         if said.as_deref() != Some(state.as_str()) {
-            println!("Board {label}: {state} Waiting.");
+            println!("Board {label} {state}, waiting");
             said = Some(state);
         }
         std::thread::sleep(RETRY);
@@ -263,37 +212,17 @@ fn connect(serial: Option<&str>, lock: Option<&std::path::Path>) -> (UsbPort, Bo
 
 fn main() {
     let node = node_name();
-    println!("Attaching to Lucy shared memory for node_name={node}");
+    let shm = Shm::attach(&node);
 
-    let shm_name = format!("/{node}");
-    let shm_file = attach_shm(&shm_name, size_of::<ShmHeader>());
-
-    let mut table_map = match unsafe { MmapMut::map_mut(&shm_file) } {
-        Ok(map) => map,
-        Err(_) => die("Lucy could not attach to the robot. Relaunch Lucy."),
-    };
-    let map_len = table_map.len();
-    let shm = unsafe { SharedTable::from_raw(table_map.as_mut_ptr(), map_len) }
-        .unwrap_or_else(|reason| {
-            let declared = unsafe { (*(table_map.as_ptr() as *const ShmHeader)).max_actuators };
-            die(format!(
-                "Shared memory {shm_name} layout mismatch: {reason} \
-                 (shm={map_len} bytes, header.max_actuators={declared}, need {} bytes). \
-                 Rebuild mcu_bridge against the current SharedTable protocol, or fix the \
-                 hardware plugin actuator count, then relaunch Lucy.",
-                ShmHeader::size_for(declared as usize)
-            ))
-        });
+    install_stop_handler();
 
     let serial = usb_serial();
     let lock = flash_lock(serial.as_deref());
-    let (port, board) = connect(serial.as_deref(), lock.as_deref());
+    let Some((port, board)) = connect(serial.as_deref(), lock.as_deref()) else {
+        return;
+    };
 
-    // Frames are sized at compile time: one `run` per link width. A Mega is built with one
-    // slot per virtual_pin of its node, so its width follows the shm.
-    // shortcut: assumes a Mega node's virtual_pins are 0..joints-1 (generated configs are);
-    // a gap shows up as "frame carries X joints, expected Y". Send the width from the board if
-    // that ever changes.
+    // shortcut: assumes virtual_pins are 0..joints-1
     let width = match board {
         Board::Rp2040 => RP2040_JOINTS,
         Board::Mega => shm.max_actuators() + 1,
@@ -310,18 +239,23 @@ fn main() {
 }
 
 fn run<const N: usize>(
-    mut shm: SharedTable,
+    mut shm: Shm,
     mut port: UsbPort,
     board: Board,
     serial: Option<String>,
-    lock: Option<std::path::PathBuf>,
+    lock: Option<PathBuf>,
     mut link: LinkFile,
-) -> ! {
+) {
     let n = shm.max_actuators();
-    // Joint slots both sides carry; a Mega's last link slot is its PCA9685 status.
-    let joints = if board == Board::Mega { N - 1 } else { N.min(n) };
+    let joints = if board == Board::Mega {
+        N - 1
+    } else {
+        N.min(n)
+    };
     if joints != n {
-        eprintln!("Warning: shm declares {n} joints but the link carries {joints}; only the first {joints} are forwarded");
+        eprintln!(
+            "Warning: shm declares {n} joints but the link carries {joints}; only the first {joints} are forwarded"
+        );
     }
 
     let mut rx_buf = vec![0u8; frame_len(N)];
@@ -363,36 +297,35 @@ fn run<const N: usize>(
             .expect("frame buffer is frame_len(N)");
 
         match port.write(&frame[..len]) {
-            Ok(()) => {
-                failed_writes = 0;
-                match wait_reply(&mut port, &mut decoder, seq) {
-                    Ok(states) => {
-                        write_states(&mut shm, joints, &states);
-                        link.record();
-                        last_answer = Instant::now();
-                        if answering != Some(true) {
-                            answering = Some(true);
-                            println!("Board {label} answering");
-                        }
-                        if board == Board::Mega {
-                            for line in pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing) {
-                                println!("{line}");
-                            }
-                        }
+            Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
+                Ok(states) => {
+                    write_states(&mut shm, joints, &states);
+                    link.record();
+                    last_answer = Instant::now();
+                    last_reply = Some(last_answer);
+                    if answering != Some(true) {
+                        answering = Some(true);
+                        println!("Board {label} answering");
                     }
-                    Err(e) => {
-                        let backlog = port.port.bytes_to_read();
-                        let kind = match e {
-                            ReplyError::Corrupt(_) => Problem::Crc,
-                            ReplyError::Timeout | ReplyError::Io(_) => Problem::ReadIo,
-                        };
-                        problems.record(kind, || format!(
-                            "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
-                        ));
+                    if board == Board::Mega {
+                        for line in pca_changes(&pcas, states.positions[N - 1], &mut pcas_missing) {
+                            println!("{line}");
+                        }
                     }
                 }
-            }
-            Err(e) => {
+                Err(e) if port.connected() => {
+                    let backlog = port.bytes_to_read();
+                    let kind = match e {
+                        ReplyError::Corrupt(_) => Problem::Crc,
+                        ReplyError::Timeout | ReplyError::Io(_) => Problem::ReadIo,
+                    };
+                    problems.record(kind, || format!(
+                        "Failed to read states frame from MCU: {e} (rx backlog: {backlog:?}), dropping"
+                    ));
+                }
+                Err(_) => {}
+            },
+            Err(e) if port.connected() => {
                 problems.record(Problem::Write, || {
                     format!("Failed to write commands over serial port: {e}, dropping tick")
                 });
@@ -519,7 +452,14 @@ mod tests {
         assert_eq!(commands.positions, [1.0, 2.0, 0.0]);
         assert_eq!(commands.torque_enabled, [true, false, false]);
 
-        write_states(&mut shm, 2, &JointStates { positions: [f64::NAN, 5.0, 256.0], ..JointStates::default() });
+        let states = JointStates {
+            positions: [f32::NAN, 5.0, 256.0],
+            temperatures: [41.0, 42.0, 43.0],
+            efforts: [0.1, 0.2, 0.3],
+            currents: [1.0, 2.0, 3.0],
+            loads: [-1.0, -2.0, -3.0],
+        };
+        write_states(&mut shm, 2, &states);
         assert!(shm.hw_positions()[0].is_nan());
         assert_eq!(&shm.hw_positions()[1..], [5.0, 0.0]);
         assert_eq!(shm.hw_temperatures(), [41.0, 42.0, 0.0]);
