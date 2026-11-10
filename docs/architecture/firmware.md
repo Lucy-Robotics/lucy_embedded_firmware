@@ -9,7 +9,7 @@ Detail for **`lucy_embedded_firmware`**.
 
 ## Control path
 
-Host `LucySystemHardware` exchanges **`f64` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM. One hardware interface and one host↔MCU bridge process run per board that has a non-empty USB `serial_id`. The bridge copies the whole table. It does not interpret plugs.
+Host `LucySystemHardware` exchanges **`f32` radians** with POSIX SHM (`ActuatorSharedState` / `JointTable`). The MCU never mmaps host SHM. One hardware interface and one host↔MCU bridge process run per board that has a non-empty USB `serial_id`. The bridge copies the whole table. It does not interpret plugs.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"darkMode": true, "background": "#0d1117", "mainBkg": "#21262d", "primaryColor": "#21262d", "primaryTextColor": "#f0f6fc", "primaryBorderColor": "#00FF41", "secondaryColor": "#161b22", "secondaryTextColor": "#f0f6fc", "secondaryBorderColor": "#00FF41", "tertiaryColor": "#161b22", "tertiaryTextColor": "#f0f6fc", "tertiaryBorderColor": "#00FF41", "lineColor": "#00FF41", "textColor": "#f0f6fc", "nodeTextColor": "#f0f6fc", "edgeLabelBackground": "#161b22", "clusterBkg": "#0d1117", "clusterBorder": "#00FF41", "titleColor": "#f0f6fc"}}}%%
@@ -19,7 +19,7 @@ flowchart TB
   LinuxFW["firmwares_linux"]
   Bridge["mcu_bridge"]
   S2040["firmwares_rp2040"]
-  HI <-->|"f64 rad + seq"| SHM
+  HI <-->|"f32 rad + seq"| SHM
   SHM <-->|"SO101_host_USB_Feetech"| LinuxFW
   SHM <-->|"not_on_MCU"| Bridge
   Bridge <-->|"USB_CDC"| S2040
@@ -98,7 +98,7 @@ One I2C init per Pico at 400 kHz. Every PCA9685 on that board shares the bus and
 | Layer | Unit |
 |-------|------|
 | Robot YAML / HI command interfaces | **radians** |
-| Host SHM | **`f64` radians** + sequence counters |
+| Host SHM | **`f32` radians** + sequence counters |
 | `pulse_width_us` and both banks | microseconds at the driver edge |
 
 ## Related

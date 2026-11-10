@@ -25,7 +25,9 @@ fn main() {
 
     let config_path = env::var("LUCY_FIRMWARE_CONFIG")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml"));
+        .unwrap_or_else(|_| {
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("config.yaml")
+        });
     println!("cargo:rerun-if-changed={}", config_path.display());
 
     // USB serial: env override, else config.yaml `serial_id`. Never hardcode a
@@ -41,18 +43,23 @@ fn main() {
             config_path.display()
         );
     }
-    let yaml = std::fs::read_to_string(&config_path).unwrap_or_else(|err| {
-        panic!("failed to read {}: {err}", config_path.display())
-    });
+    let yaml = std::fs::read_to_string(&config_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", config_path.display()));
     if yaml.trim().is_empty() {
         panic!(
             "{} is empty; expected a projected firmware spec with pwm:/i2c_pwm:",
             config_path.display()
         );
     }
-    let has_pwm_key = yaml.lines().any(|line| line.trim_start().starts_with("pwm:"));
-    let has_i2c_pwm_key = yaml.lines().any(|line| line.trim_start().starts_with("i2c_pwm:"));
-    let has_actuators_key = yaml.lines().any(|line| line.trim_start().starts_with("actuators:"));
+    let has_pwm_key = yaml
+        .lines()
+        .any(|line| line.trim_start().starts_with("pwm:"));
+    let has_i2c_pwm_key = yaml
+        .lines()
+        .any(|line| line.trim_start().starts_with("i2c_pwm:"));
+    let has_actuators_key = yaml
+        .lines()
+        .any(|line| line.trim_start().starts_with("actuators:"));
     if has_actuators_key && !has_pwm_key {
         panic!(
             "{} looks like a hardware mapping; expected a projected firmware spec with pwm:/i2c_pwm:",

@@ -58,8 +58,8 @@ pub fn channel_bytes(pulse_us: u16, torque_on: bool) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_base, channel_bytes, init_writes, off_count, sleep_config_writes, wake_write,
-        PRE_SCALE_50HZ, WAKE_DELAY_US,
+        PRE_SCALE_50HZ, WAKE_DELAY_US, channel_base, channel_bytes, init_writes, off_count,
+        sleep_config_writes, wake_write,
     };
 
     #[test]
