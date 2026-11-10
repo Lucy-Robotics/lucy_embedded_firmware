@@ -234,3 +234,33 @@ fn missing_load_reply_keeps_current_and_effort() {
     );
     assert_eq!(state.map(|s| s.load), [0.5, 0.0, 0.5]);
 }
+
+fn byte_status(id: u8, value: u8) -> Vec<u8> {
+    let body = [id, 3, 0, value];
+    let sum = body.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
+    [vec![0xFF, 0xFF], body.to_vec(), vec![!sum]].concat()
+}
+
+#[test]
+fn silent_servo_drops_its_last_voltage() {
+    let mut driver = FeetechBusDriver::<MockBus, 3>::new(&CONFIG);
+    let mut state = [State::default(); 3];
+    let powered = [
+        byte_status(1, 122),
+        byte_status(2, 122),
+        byte_status(3, 122),
+    ]
+    .concat();
+    let mut bus = MockBus { rx: powered.into() };
+    driver.read_voltage(&mut bus, &mut state).unwrap();
+    assert!(state.iter().all(|s| (s.voltage - 12.2).abs() < EPS));
+
+    let mut bus = MockBus {
+        rx: byte_status(2, 121).into(),
+    };
+    assert!(driver.read_voltage(&mut bus, &mut state).is_err());
+    let volts: Vec<f32> = state.iter().map(|s| s.voltage).collect();
+    assert_eq!(volts[0], 0.0);
+    assert!((volts[1] - 12.1).abs() < EPS);
+    assert_eq!(volts[2], 0.0);
+}
