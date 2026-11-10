@@ -22,4 +22,17 @@ mod tests {
         assert_eq!(pulse_width_us(PI, PI, 500, 2500), 2500);
         assert_eq!(pulse_width_us(FRAC_PI_2, PI, 500, 2500), 1500);
     }
+
+    #[test]
+    fn empty_travel_holds_the_minimum_pulse() {
+        assert_eq!(pulse_width_us(1.0, 0.0, 500, 2500), 500);
+        assert_eq!(pulse_width_us(1.0, PI, 1500, 1500), 1500);
+        assert_eq!(pulse_width_us(1.0, PI, 2000, 1000), 2000);
+    }
+
+    #[test]
+    fn positions_outside_the_travel_stop_at_its_ends() {
+        assert_eq!(pulse_width_us(-1.0, PI, 500, 2500), 500);
+        assert_eq!(pulse_width_us(2.0 * PI, PI, 500, 2500), 2500);
+    }
 }
