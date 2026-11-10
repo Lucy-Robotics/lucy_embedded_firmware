@@ -99,6 +99,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         let extra = match (tick % 2, tick % 10) {
             (1, _) => self.read_effort(bus, state),
             (_, 0) => self.read_temperature(bus, state),
+            (_, 2) => self.read_voltage(bus, state),
             _ => Ok(()),
         };
         torque.and(position).and(feedback).and(extra)
