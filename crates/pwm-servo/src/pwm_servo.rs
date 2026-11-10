@@ -136,4 +136,11 @@ mod tests {
     fn torque_enabled_maps_position() {
         assert_eq!(pulse_for(TorqueStatus::Enabled, PI / 2.0), Some(1500));
     }
+
+    #[test]
+    fn default_travel_is_half_a_turn_on_500_to_2500_us() {
+        let config = PwmServoConfig::default();
+        assert_eq!(config.amplitude, PI);
+        assert_eq!((config.min_pulse, config.max_pulse), (500, 2500));
+    }
 }
