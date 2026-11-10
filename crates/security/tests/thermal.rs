@@ -120,6 +120,14 @@ fn nan_readings_keep_the_current_decision() {
 }
 
 #[test]
+fn a_servo_that_never_reports_a_temperature_keeps_torque() {
+    let mut guard = ThermalGuard::new(&LIMITS);
+    let command = read(&mut guard, f32::NAN, 25.0);
+    assert_eq!(torque(&command), [TorqueStatus::Enabled; 2]);
+    assert!(!guard.tripped());
+}
+
+#[test]
 fn robot_tick_applies_the_guard_before_driving() {
     let mut robot = Robot::<2, _>::new(&JOINTS_CONFIG, ThermalGuard::new(&LIMITS));
     *robot.commands_mut() = enabled();
