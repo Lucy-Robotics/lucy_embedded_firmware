@@ -13,7 +13,7 @@ fn tracked_update_reports_which_servos_answered() {
     let mut seen = [false; 2];
 
     // Tick 5 skips the temperature and effort reads.
-    let result = driver().update_tracked(5, &mut bus, &mut command, &mut state, &mut seen);
+    let result = driver().update_tracked(4, &mut bus, &mut command, &mut state, &mut seen);
 
     assert!(result.is_err());
     assert_eq!(seen, [true, false]);
