@@ -1,7 +1,9 @@
 use lucy_embedded_firmware_core::guard::Guard;
 use lucy_embedded_firmware_core::joint::{Command, CommandConfig, State, TorqueStatus};
 use lucy_embedded_firmware_core::robot::Robot;
-use lucy_embedded_firmware_security::thermal::{ThermalGuard, ThermalLimit};
+use lucy_embedded_firmware_security::thermal::{
+    APPLIES_PER_READING, MEDIAN_READINGS, ThermalGuard, ThermalLimit,
+};
 
 static LIMITS: [ThermalLimit; 2] = [ThermalLimit::new(70.0, 60.0), ThermalLimit::new(70.0, 60.0)];
 static JOINTS_CONFIG: [CommandConfig; 2] = [CommandConfig {
@@ -34,20 +36,47 @@ fn torque(command: &[Command; 2]) -> [TorqueStatus; 2] {
     command.map(|c| c.torque_enabled)
 }
 
+fn read(guard: &mut ThermalGuard<2>, t0: f32, t1: f32) -> [Command; 2] {
+    let mut command = enabled();
+    for _ in 0..APPLIES_PER_READING {
+        command = enabled();
+        guard.apply(&at(t0, t1), &mut command);
+    }
+    command
+}
+
 #[test]
 fn below_max_keeps_commanded_torque() {
     let mut guard = ThermalGuard::new(&LIMITS);
-    let mut command = enabled();
-    guard.apply(&at(69.0, 25.0), &mut command);
+    let command = read(&mut guard, 69.0, 25.0);
     assert_eq!(torque(&command), [TorqueStatus::Enabled; 2]);
     assert!(!guard.tripped());
 }
 
 #[test]
-fn at_max_cuts_only_the_hot_joint() {
+fn one_hot_reading_among_normal_ones_keeps_torque() {
     let mut guard = ThermalGuard::new(&LIMITS);
-    let mut command = enabled();
-    guard.apply(&at(70.0, 25.0), &mut command);
+    for _ in 0..10 {
+        read(&mut guard, 30.0, 25.0);
+    }
+    let command = read(&mut guard, 77.0, 25.0);
+    assert_eq!(torque(&command), [TorqueStatus::Enabled; 2]);
+    assert!(!guard.tripped());
+}
+
+#[test]
+fn a_median_at_max_cuts_only_the_hot_joint() {
+    let mut guard = ThermalGuard::new(&LIMITS);
+    for _ in 0..MEDIAN_READINGS {
+        read(&mut guard, 30.0, 25.0);
+    }
+    for _ in 0..MEDIAN_READINGS / 2 {
+        assert_eq!(
+            read(&mut guard, 70.0, 25.0)[0].torque_enabled,
+            TorqueStatus::Enabled
+        );
+    }
+    let command = read(&mut guard, 70.0, 25.0);
     assert_eq!(
         torque(&command),
         [TorqueStatus::Disabled, TorqueStatus::Enabled]
@@ -57,31 +86,45 @@ fn at_max_cuts_only_the_hot_joint() {
 }
 
 #[test]
-fn stays_latched_against_new_commands_until_release() {
+fn stays_latched_until_the_median_cools_to_release() {
     let mut guard = ThermalGuard::new(&LIMITS);
-    guard.apply(&at(75.0, 25.0), &mut enabled());
-
-    let mut command = enabled();
-    guard.apply(&at(65.0, 25.0), &mut command);
-    assert_eq!(command[0].torque_enabled, TorqueStatus::Disabled);
-
-    let mut command = enabled();
-    guard.apply(&at(60.0, 25.0), &mut command);
-    assert_eq!(command[0].torque_enabled, TorqueStatus::Enabled);
+    for _ in 0..MEDIAN_READINGS {
+        read(&mut guard, 75.0, 25.0);
+    }
+    for _ in 0..MEDIAN_READINGS {
+        assert_eq!(
+            read(&mut guard, 65.0, 25.0)[0].torque_enabled,
+            TorqueStatus::Disabled
+        );
+    }
+    for _ in 0..MEDIAN_READINGS / 2 {
+        read(&mut guard, 60.0, 25.0);
+    }
+    assert_eq!(
+        read(&mut guard, 60.0, 25.0)[0].torque_enabled,
+        TorqueStatus::Enabled
+    );
     assert!(!guard.tripped());
 }
 
 #[test]
-fn nan_reading_keeps_the_current_decision() {
+fn nan_readings_keep_the_current_decision() {
     let mut guard = ThermalGuard::new(&LIMITS);
-    guard.apply(&at(75.0, 25.0), &mut enabled());
+    read(&mut guard, 75.0, 25.0);
 
-    let mut command = enabled();
-    guard.apply(&at(f32::NAN, f32::NAN), &mut command);
+    let command = read(&mut guard, f32::NAN, f32::NAN);
     assert_eq!(
         torque(&command),
         [TorqueStatus::Disabled, TorqueStatus::Enabled]
     );
+}
+
+#[test]
+fn a_servo_that_never_reports_a_temperature_keeps_torque() {
+    let mut guard = ThermalGuard::new(&LIMITS);
+    let command = read(&mut guard, f32::NAN, 25.0);
+    assert_eq!(torque(&command), [TorqueStatus::Enabled; 2]);
+    assert!(!guard.tripped());
 }
 
 #[test]
@@ -93,6 +136,9 @@ fn robot_tick_applies_the_guard_before_driving() {
         assert_eq!(torque(command), [TorqueStatus::Enabled; 2]);
         *state = at(80.0, 25.0);
     });
+    for _ in 0..APPLIES_PER_READING {
+        robot.tick(|_, _| {});
+    }
     assert!(robot.faulted());
 
     *robot.commands_mut() = enabled();
