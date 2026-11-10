@@ -79,7 +79,7 @@ fn main() {
 
         if !board.connected() {
             gains_set = false;
-        } else if !gains_set {
+        } else if !gains_set && tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
             gains_set = set_position_gains(&mut board);
         }
 
