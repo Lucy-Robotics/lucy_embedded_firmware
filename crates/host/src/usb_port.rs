@@ -17,6 +17,7 @@ pub struct UsbPortConfig {
     pub serial_number: Option<String>,
     pub baud_rate: u32,
     pub clear_buffer: ClearBuffer,
+    pub io_timeout: Duration,
 }
 
 impl UsbPortConfig {
@@ -27,6 +28,7 @@ impl UsbPortConfig {
             serial_number: None,
             baud_rate,
             clear_buffer: ClearBuffer::Input,
+            io_timeout: IO_TIMEOUT,
         }
     }
 
@@ -35,6 +37,10 @@ impl UsbPortConfig {
             clear_buffer,
             ..self
         }
+    }
+
+    pub fn with_io_timeout(self, io_timeout: Duration) -> Self {
+        Self { io_timeout, ..self }
     }
 
     pub fn with_serial_number(self, serial_number: Option<String>) -> Self {
@@ -75,7 +81,7 @@ impl UsbPortConfig {
         let port_info = self.find()?;
 
         let port = serialport::new(&port_info.port_name, self.baud_rate)
-            .timeout(IO_TIMEOUT)
+            .timeout(self.io_timeout)
             .open()?;
         port.clear(ClearBuffer::All)?;
         Ok((port_info.port_name, port))

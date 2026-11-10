@@ -18,11 +18,11 @@ mod status_report;
 #[cfg(test)]
 mod test_support;
 mod usb_port;
-use config::{Telemetry, get_robot, robot_release, robot_tick};
+use config::{Telemetry, get_robot, robot_release, robot_tick, set_position_gains};
 use maintenance_handler::handle_maintenance;
 
 /// Control ticks between looking for plugged or unplugged adapters (1 s).
-const ADAPTER_REFRESH_TICKS: u64 = 20;
+const ADAPTER_REFRESH_TICKS: u64 = 100;
 
 fn main() {
     let node = node_name();
@@ -53,10 +53,11 @@ fn main() {
         .command_seq
         .load(core::sync::atomic::Ordering::SeqCst);
 
-    let period = Duration::from_millis(50);
+    let period = Duration::from_millis(10);
     let mut next_tick = std::time::Instant::now();
     let mut tick_count: u64 = 0;
     let mut faulted = false;
+    let mut gains_set = false;
 
     while !stop_requested() {
         next_tick += period;
@@ -75,6 +76,12 @@ fn main() {
         }
 
         robot_tick(tick_count, &mut robot, &mut board, &mut telemetry);
+
+        if !board.connected() {
+            gains_set = false;
+        } else if !gains_set && tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
+            gains_set = set_position_gains(&mut board);
+        }
 
         ass.header().set_link_state(if board.connected() {
             LinkState::Connected

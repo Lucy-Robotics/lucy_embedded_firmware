@@ -10,6 +10,10 @@ pub(crate) const REG_MAX: u8 = 11;
 pub(crate) const REG_HOMING: u8 = 31;
 pub(crate) const REG_LOCK: u8 = 55;
 pub(crate) const REG_PRESENT: u8 = 56;
+pub(crate) const REG_P_COEFFICIENT: u8 = 21;
+pub(crate) const REG_LOAD: u8 = 0x3C;
+pub(crate) const REG_TEMPERATURE: u8 = 0x3F;
+pub(crate) const REG_CURRENT: u8 = 0x45;
 
 pub(crate) const SYNC_READ: u8 = 0x82;
 pub(crate) const SYNC_WRITE: u8 = 0x83;
@@ -26,6 +30,7 @@ pub(crate) struct FakeServo {
     pub(crate) stale_reads: usize,
     /// Homing writes this servo still accepts; later ones are silently lost.
     pub(crate) homing_writes_left: usize,
+    pub(crate) gains: [u8; 3],
 }
 
 impl FakeServo {
@@ -39,6 +44,7 @@ impl FakeServo {
             answers: true,
             stale_reads: 0,
             homing_writes_left: usize::MAX,
+            gains: [32, 32, 0],
         }
     }
 
@@ -53,6 +59,10 @@ impl FakeServo {
             return;
         }
         if self.locked {
+            return;
+        }
+        if register == REG_P_COEFFICIENT {
+            self.gains.copy_from_slice(&data[..3]);
             return;
         }
         let value = u16::from_le_bytes([data[0], data[1]]);
@@ -73,6 +83,7 @@ impl FakeServo {
             REG_MAX => self.max,
             REG_HOMING => self.homing,
             REG_PRESENT => self.present(),
+            REG_LOAD | REG_TEMPERATURE | REG_CURRENT => 0,
             _ => panic!("unexpected read of register {register}"),
         }
     }
@@ -83,6 +94,7 @@ pub(crate) struct FakeBus {
     pub(crate) servos: HashMap<u8, FakeServo>,
     rx: VecDeque<u8>,
     pub(crate) instructions: Vec<u8>,
+    pub(crate) read_registers: Vec<u8>,
 }
 
 impl FakeBus {
@@ -134,6 +146,7 @@ impl SerialChannel for FakeBus {
                 }
             }
             SYNC_READ => {
+                self.read_registers.push(register);
                 for &id in params {
                     let Some(servo) = self.servos.get_mut(&id) else {
                         continue;
