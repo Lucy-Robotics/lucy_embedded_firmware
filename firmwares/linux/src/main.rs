@@ -7,12 +7,16 @@ use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
 
 mod resources;
 
+// Not wired into main() until the next PR in the stack lands the handler.
+#[allow(dead_code)]
 mod maintenance;
 
 mod board;
 use board::init;
 
 mod config;
+#[cfg(test)]
+mod test_support;
 use config::{get_robot, robot_release, robot_tick};
 
 fn main() {

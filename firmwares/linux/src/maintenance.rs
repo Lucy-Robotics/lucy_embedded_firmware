@@ -7,5 +7,8 @@
 mod protocol;
 mod server;
 
+// Not wired into main() until the next PR in the stack lands the handler.
+#[allow(unused_imports)]
 pub use protocol::{Request, RestoreEntry, json_error, json_string};
+#[allow(unused_imports)]
 pub use server::{Server, socket_path};
