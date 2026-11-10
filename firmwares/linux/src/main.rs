@@ -22,7 +22,7 @@ use config::{Telemetry, get_robot, robot_release, robot_tick, set_position_gains
 use maintenance_handler::handle_maintenance;
 
 /// Control ticks between looking for plugged or unplugged adapters (1 s).
-const ADAPTER_REFRESH_TICKS: u64 = 20;
+const ADAPTER_REFRESH_TICKS: u64 = 100;
 
 fn main() {
     let node = node_name();
@@ -53,7 +53,7 @@ fn main() {
         .command_seq
         .load(core::sync::atomic::Ordering::SeqCst);
 
-    let period = Duration::from_millis(50);
+    let period = Duration::from_millis(10);
     let mut next_tick = std::time::Instant::now();
     let mut tick_count: u64 = 0;
     let mut faulted = false;

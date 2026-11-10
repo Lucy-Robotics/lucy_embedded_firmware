@@ -1,9 +1,13 @@
+use std::time::Duration;
+
 use lucy_embedded_firmware_host::usb_port::{Adapter, UsbPortConfig};
 
 use crate::config::{USB_BAUD_RATE, USB_PID, USB_VID};
 
+const REPLY_TIMEOUT: Duration = Duration::from_millis(5);
+
 pub(crate) fn lucy_usb_config() -> UsbPortConfig {
-    UsbPortConfig::new(USB_VID, USB_PID, USB_BAUD_RATE)
+    UsbPortConfig::new(USB_VID, USB_PID, USB_BAUD_RATE).with_io_timeout(REPLY_TIMEOUT)
 }
 
 /// Which adapter to drive, given what is connected and what was asked for.
