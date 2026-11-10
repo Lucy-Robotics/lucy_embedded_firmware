@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use portable_atomic::{AtomicU32, AtomicU64};
 
 pub const SHM_PAYLOAD_OFFSET: usize = 144;
-pub const SHM_ARRAYS: usize = 9;
+pub const SHM_ARRAYS: usize = 10;
 
 #[repr(C)]
 pub struct ShmHeader {
@@ -139,5 +139,11 @@ impl SharedTable {
     }
     pub fn hw_loads_mut(&mut self) -> &mut [f32] {
         self.slice_mut(8)
+    }
+    pub fn hw_voltages(&self) -> &[f32] {
+        self.slice(9)
+    }
+    pub fn hw_voltages_mut(&mut self) -> &mut [f32] {
+        self.slice_mut(9)
     }
 }

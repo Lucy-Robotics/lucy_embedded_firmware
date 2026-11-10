@@ -15,7 +15,31 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         state: &mut [State],
     ) -> Result<(), FeetechBusError> {
         const REG_TEMP: u8 = 0x3F;
+        self.read_byte_register(bus, state, REG_TEMP, |state, raw| {
+            state.temperature = raw as f32
+        })
+    }
 
+    pub fn read_voltage(
+        &mut self,
+        bus: &mut S,
+        state: &mut [State],
+    ) -> Result<(), FeetechBusError> {
+        const REG_PRESENT_VOLTAGE: u8 = 0x3E;
+        // A servo that lost its supply stops answering: it must not keep its last voltage
+        state.iter_mut().for_each(|s| s.voltage = 0.0);
+        self.read_byte_register(bus, state, REG_PRESENT_VOLTAGE, |state, raw| {
+            state.voltage = raw as f32 / 10.0
+        })
+    }
+
+    fn read_byte_register(
+        &mut self,
+        bus: &mut S,
+        state: &mut [State],
+        register: u8,
+        apply: impl Fn(&mut State, u8),
+    ) -> Result<(), FeetechBusError> {
         if state.len() != N {
             return Err(FeetechBusError::OutOfLimits);
         }
@@ -32,7 +56,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
         let (frame, size) = RequestBuilder::<64>::new()
             .set_id(0xFE)
             .set_instruction(SYNC_READ)
-            .set_register(REG_TEMP)
+            .set_register(register)
             .set_sync_length(1)
             .build(ids)
             .map_err(|_| FeetechBusError::OutOfLimits)?;
@@ -44,7 +68,7 @@ impl<S: SerialChannel, const N: usize> FeetechBusDriver<S, N> {
             .map_err(|_| FeetechBusError::CommunicationError)?;
 
         read_replies(bus, self.config, |i, params: &[u8; 1]| {
-            state[i].temperature = params[0] as f32;
+            apply(&mut state[i], params[0]);
         })
     }
 
