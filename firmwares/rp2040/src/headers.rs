@@ -18,7 +18,10 @@ pub struct KeptPins {
 macro_rules! bind_pwm {
     ($slices:expr, $pin:expr, $slice:ident, $channel:ident) => {{
         if let Some(pin) = $pin {
-            $slices.$slice.$channel.output_to(pin.into_function::<gpio::FunctionPwm>());
+            $slices
+                .$slice
+                .$channel
+                .output_to(pin.into_function::<gpio::FunctionPwm>());
             $slices.$slice.set_div_int(125);
             $slices.$slice.set_top(19_999);
             $slices.$slice.enable();
@@ -58,32 +61,113 @@ pub fn attach(pins: gpio::Pins, slices: &mut pwm::Slices) -> KeptPins {
         gpio21,
         ..
     } = pins;
-    if used[0] { bind_pwm!(slices, Some(gpio0), pwm0, channel_a); } else { drop(gpio0); }
-    if used[1] { bind_pwm!(slices, Some(gpio1), pwm0, channel_b); } else { drop(gpio1); }
-    if used[2] { bind_pwm!(slices, Some(gpio2), pwm1, channel_a); } else { drop(gpio2); }
-    if used[3] { bind_pwm!(slices, Some(gpio3), pwm1, channel_b); } else { drop(gpio3); }
-    if used[4] { bind_pwm!(slices, Some(gpio4), pwm2, channel_a); } else { drop(gpio4); }
-    if used[5] { bind_pwm!(slices, Some(gpio5), pwm2, channel_b); } else { drop(gpio5); }
-    if used[6] { bind_pwm!(slices, Some(gpio6), pwm3, channel_a); } else { drop(gpio6); }
-    if used[7] { bind_pwm!(slices, Some(gpio7), pwm3, channel_b); } else { drop(gpio7); }
-    if used[8] { bind_pwm!(slices, Some(gpio8), pwm4, channel_a); } else { drop(gpio8); }
-    if used[9] { bind_pwm!(slices, Some(gpio9), pwm4, channel_b); } else { drop(gpio9); }
-    if used[10] { bind_pwm!(slices, Some(gpio10), pwm5, channel_a); } else { drop(gpio10); }
-    if used[11] { bind_pwm!(slices, Some(gpio11), pwm5, channel_b); } else { drop(gpio11); }
-    if used[12] { bind_pwm!(slices, Some(gpio12), pwm6, channel_a); } else { drop(gpio12); }
-    if used[13] { bind_pwm!(slices, Some(gpio13), pwm6, channel_b); } else { drop(gpio13); }
-    if used[14] { bind_pwm!(slices, Some(gpio14), pwm7, channel_a); } else { drop(gpio14); }
-    if used[15] { bind_pwm!(slices, Some(gpio15), pwm7, channel_b); } else { drop(gpio15); }
-    if used[16] { bind_pwm!(slices, Some(gpio16), pwm0, channel_a); } else { drop(gpio16); }
-    if used[17] { bind_pwm!(slices, Some(gpio17), pwm0, channel_b); } else { drop(gpio17); }
-    KeptPins { gpio18, gpio20, gpio21 }
+    if used[0] {
+        bind_pwm!(slices, Some(gpio0), pwm0, channel_a);
+    } else {
+        let _ = gpio0;
+    }
+    if used[1] {
+        bind_pwm!(slices, Some(gpio1), pwm0, channel_b);
+    } else {
+        let _ = gpio1;
+    }
+    if used[2] {
+        bind_pwm!(slices, Some(gpio2), pwm1, channel_a);
+    } else {
+        let _ = gpio2;
+    }
+    if used[3] {
+        bind_pwm!(slices, Some(gpio3), pwm1, channel_b);
+    } else {
+        let _ = gpio3;
+    }
+    if used[4] {
+        bind_pwm!(slices, Some(gpio4), pwm2, channel_a);
+    } else {
+        let _ = gpio4;
+    }
+    if used[5] {
+        bind_pwm!(slices, Some(gpio5), pwm2, channel_b);
+    } else {
+        let _ = gpio5;
+    }
+    if used[6] {
+        bind_pwm!(slices, Some(gpio6), pwm3, channel_a);
+    } else {
+        let _ = gpio6;
+    }
+    if used[7] {
+        bind_pwm!(slices, Some(gpio7), pwm3, channel_b);
+    } else {
+        let _ = gpio7;
+    }
+    if used[8] {
+        bind_pwm!(slices, Some(gpio8), pwm4, channel_a);
+    } else {
+        let _ = gpio8;
+    }
+    if used[9] {
+        bind_pwm!(slices, Some(gpio9), pwm4, channel_b);
+    } else {
+        let _ = gpio9;
+    }
+    if used[10] {
+        bind_pwm!(slices, Some(gpio10), pwm5, channel_a);
+    } else {
+        let _ = gpio10;
+    }
+    if used[11] {
+        bind_pwm!(slices, Some(gpio11), pwm5, channel_b);
+    } else {
+        let _ = gpio11;
+    }
+    if used[12] {
+        bind_pwm!(slices, Some(gpio12), pwm6, channel_a);
+    } else {
+        let _ = gpio12;
+    }
+    if used[13] {
+        bind_pwm!(slices, Some(gpio13), pwm6, channel_b);
+    } else {
+        let _ = gpio13;
+    }
+    if used[14] {
+        bind_pwm!(slices, Some(gpio14), pwm7, channel_a);
+    } else {
+        let _ = gpio14;
+    }
+    if used[15] {
+        bind_pwm!(slices, Some(gpio15), pwm7, channel_b);
+    } else {
+        let _ = gpio15;
+    }
+    if used[16] {
+        bind_pwm!(slices, Some(gpio16), pwm0, channel_a);
+    } else {
+        let _ = gpio16;
+    }
+    if used[17] {
+        bind_pwm!(slices, Some(gpio17), pwm0, channel_b);
+    } else {
+        let _ = gpio17;
+    }
+    KeptPins {
+        gpio18,
+        gpio20,
+        gpio21,
+    }
 }
 
 pub fn write(slices: &mut pwm::Slices, commands: &[Command]) {
     for row in PWM_ROWS {
         let command = commands.get(row.virtual_pin).copied().unwrap_or_default();
         let duty = if command.torque_enabled == TorqueStatus::Enabled {
-            pulse_width_us(command.position, row.amplitude, row.min_pulse, row.max_pulse)
+            pulse_width_us(
+                command.position,
+                row.amplitude,
+                row.min_pulse,
+                row.max_pulse,
+            )
         } else {
             0
         };

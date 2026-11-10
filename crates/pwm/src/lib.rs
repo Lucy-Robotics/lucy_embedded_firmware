@@ -2,5 +2,8 @@
 
 pub mod pca9685;
 pub mod pulse;
-pub mod pwm_channel;
-pub mod pwm_servo;
+
+pub trait PwmChannel {
+    type Error;
+    fn set_pwm(&mut self, pulse: u16) -> Result<(), Self::Error>;
+}
