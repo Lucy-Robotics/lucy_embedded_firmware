@@ -68,6 +68,7 @@ impl<const M: usize, G: Guard> Robot<M, G> {
             shm.hw_efforts_mut()[i] = self.joints_state[i].effort;
             shm.hw_currents_mut()[i] = self.joints_state[i].current;
             shm.hw_loads_mut()[i] = self.joints_state[i].load;
+            shm.hw_voltages_mut()[i] = self.joints_state[i].voltage;
         }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use lucy_embedded_firmware_core::joint::State;
 use lucy_embedded_firmware_feetech::feetech::{
-    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
+    FeetechBusConfig, FeetechBusDriver, FeetechBusError, FeetechServoConfig,
 };
 use lucy_embedded_firmware_serial::SerialChannel;
 
@@ -233,4 +233,73 @@ fn missing_load_reply_keeps_current_and_effort() {
             .all(|s| (s.effort - expected_effort(200)).abs() < EPS)
     );
     assert_eq!(state.map(|s| s.load), [0.5, 0.0, 0.5]);
+}
+
+fn byte_status(id: u8, value: u8) -> Vec<u8> {
+    let body = [id, 3, 0, value];
+    let sum = body.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
+    [vec![0xFF, 0xFF], body.to_vec(), vec![!sum]].concat()
+}
+
+#[test]
+fn silent_servo_drops_its_last_voltage() {
+    let mut driver = FeetechBusDriver::<MockBus, 3>::new(&CONFIG);
+    let mut state = [State::default(); 3];
+    let powered = [
+        byte_status(1, 122),
+        byte_status(2, 122),
+        byte_status(3, 122),
+    ]
+    .concat();
+    let mut bus = MockBus { rx: powered.into() };
+    driver.read_voltage(&mut bus, &mut state).unwrap();
+    assert!(state.iter().all(|s| (s.voltage - 12.2).abs() < EPS));
+
+    let mut bus = MockBus {
+        rx: byte_status(2, 121).into(),
+    };
+    assert!(driver.read_voltage(&mut bus, &mut state).is_err());
+    let volts: Vec<f32> = state.iter().map(|s| s.voltage).collect();
+    assert_eq!(volts[0], 0.0);
+    assert!((volts[1] - 12.1).abs() < EPS);
+    assert_eq!(volts[2], 0.0);
+}
+
+#[test]
+fn voltage_read_refuses_a_state_slice_of_the_wrong_length() {
+    let mut bus = MockBus {
+        rx: VecDeque::new(),
+    };
+    let mut state = [State::default(); 2];
+    let result = FeetechBusDriver::<MockBus, 3>::new(&CONFIG).read_voltage(&mut bus, &mut state);
+    assert_eq!(result, Err(FeetechBusError::OutOfLimits));
+}
+
+static TOO_MANY_SERVOS: FeetechBusConfig<65> = FeetechBusConfig {
+    servos: [servo(1); 65],
+};
+
+#[test]
+fn voltage_read_refuses_more_servos_than_one_sync_read_holds() {
+    let mut bus = MockBus {
+        rx: VecDeque::new(),
+    };
+    let mut state = [State::default(); 65];
+    let result =
+        FeetechBusDriver::<MockBus, 65>::new(&TOO_MANY_SERVOS).read_voltage(&mut bus, &mut state);
+    assert_eq!(result, Err(FeetechBusError::OutOfLimits));
+}
+
+#[test]
+fn temperature_read_stores_each_servo_reply_in_celsius() {
+    let replies = [byte_status(1, 31), byte_status(2, 55), byte_status(3, 64)].concat();
+    let mut bus = MockBus { rx: replies.into() };
+    let mut state = [State::default(); 3];
+
+    FeetechBusDriver::<MockBus, 3>::new(&CONFIG)
+        .read_temperature(&mut bus, &mut state)
+        .unwrap();
+
+    let celsius: Vec<f32> = state.iter().map(|s| s.temperature).collect();
+    assert_eq!(celsius, vec![31.0, 55.0, 64.0]);
 }

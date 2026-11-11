@@ -7,7 +7,7 @@ use lucy_embedded_firmware_core::utils::map_range;
 #[test]
 fn shm_arrays_hold_four_byte_values() {
     assert_eq!(ShmHeader::size_for(0), 192);
-    assert_eq!(ShmHeader::size_for(6), 192 + 9 * 6 * 4);
+    assert_eq!(ShmHeader::size_for(6), 192 + 10 * 6 * 4);
 }
 
 /// A held position must not drift: every Feetech tick has to survive tick -> rad -> tick in f32.

@@ -38,4 +38,5 @@ pub struct State {
     pub effort: f32,
     pub current: f32,
     pub load: f32,
+    pub voltage: f32,
 }

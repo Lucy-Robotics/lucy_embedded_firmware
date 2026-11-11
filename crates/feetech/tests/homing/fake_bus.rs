@@ -13,6 +13,7 @@ pub(crate) const REG_PRESENT: u8 = 56;
 pub(crate) const REG_P_COEFFICIENT: u8 = 21;
 pub(crate) const REG_LOAD: u8 = 0x3C;
 pub(crate) const REG_TEMPERATURE: u8 = 0x3F;
+pub(crate) const REG_VOLTAGE: u8 = 0x3E;
 pub(crate) const REG_CURRENT: u8 = 0x45;
 
 pub(crate) const SYNC_READ: u8 = 0x82;
@@ -83,7 +84,7 @@ impl FakeServo {
             REG_MAX => self.max,
             REG_HOMING => self.homing,
             REG_PRESENT => self.present(),
-            REG_LOAD | REG_TEMPERATURE | REG_CURRENT => 0,
+            REG_LOAD | REG_TEMPERATURE | REG_VOLTAGE | REG_CURRENT => 0,
             _ => panic!("unexpected read of register {register}"),
         }
     }
