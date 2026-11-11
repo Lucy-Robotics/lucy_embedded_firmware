@@ -18,6 +18,24 @@ pub fn node_name() -> String {
         .unwrap_or_else(|| "lucy".to_string())
 }
 
+/// POSIX shm name of a ros2_control node: `/<node>.domain<ROS_DOMAIN_ID>`.
+///
+/// The domain keeps robots on separate ROS domains of one host on separate segments.
+/// ROS_DOMAIN_ID unset or not a plain number counts as 0. lucy_ros2_control creates the
+/// segment under the same name (`lucy_shm_name` in shared_memory_channel.cpp): keep both
+/// in step.
+pub fn shm_name(node: &str) -> String {
+    shm_name_in_domain(node, std::env::var("ROS_DOMAIN_ID").ok().as_deref())
+}
+
+fn shm_name_in_domain(node: &str, domain: Option<&str>) -> String {
+    let domain = domain
+        .filter(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|d| d.parse::<u32>().ok())
+        .unwrap_or(0);
+    format!("/{}.domain{domain}", node.trim_start_matches('/'))
+}
+
 pub struct Shm {
     table: SharedTable,
     _map: MmapMut,
@@ -25,7 +43,7 @@ pub struct Shm {
 
 impl Shm {
     pub fn attach(node: &str) -> Self {
-        let name = format!("/{node}");
+        let name = shm_name(node);
         let c_name = CString::new(name.as_str()).expect("shm name contains a NUL byte");
         let mut last_error = String::new();
 
@@ -79,5 +97,36 @@ impl Deref for Shm {
 impl DerefMut for Shm {
     fn deref_mut(&mut self) -> &mut SharedTable {
         &mut self.table
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shm_name_in_domain;
+
+    // lucy_ros2_control's test_shared_memory_channel.cpp (LucyShmName) checks the same cases.
+    #[test]
+    fn name_carries_the_ros_domain() {
+        assert_eq!(shm_name_in_domain("so_arm", Some("3")), "/so_arm.domain3");
+        assert_eq!(shm_name_in_domain("/so_arm", Some("3")), "/so_arm.domain3");
+        assert_eq!(shm_name_in_domain("so_arm", Some("07")), "/so_arm.domain7");
+    }
+
+    #[test]
+    fn missing_or_invalid_domain_is_zero() {
+        for domain in [
+            None,
+            Some(""),
+            Some("abc"),
+            Some("3x"),
+            Some("-1"),
+            Some("+3"),
+        ] {
+            assert_eq!(
+                shm_name_in_domain("so_arm", domain),
+                "/so_arm.domain0",
+                "{domain:?}"
+            );
+        }
     }
 }

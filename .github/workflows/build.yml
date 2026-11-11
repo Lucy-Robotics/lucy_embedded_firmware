@@ -5,17 +5,39 @@ on:
     branches: [master, dev]
   pull_request:
 
+# No Cargo workspace: every crate and firmware is its own package, so each step
+# loops over the manifests. Loop jobs share one target dir to reuse compiled deps.
+# Host packages: every crate except builder (not compiling yet), plus the host firmwares.
+# arduino_mega (pinned AVR nightly) and rp2040 (thumbv6m) have their own jobs.
+env:
+  HOST_PACKAGES: >-
+    crates/communication crates/core crates/feetech crates/host crates/pwm
+    crates/pwm-servo crates/security crates/serial
+    firmwares/linux firmwares/mcu_bridge
+
 jobs:
   lint:
     name: Lint (fmt + clippy)
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - run: rustup component add rustfmt clippy
       - run: rustup target add thumbv6m-none-eabi
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder --all-targets -- -D warnings
+      - name: cargo fmt
+        run: |
+          set -e
+          for pkg in crates/builder $HOST_PACKAGES firmwares/rp2040; do
+            cargo fmt --manifest-path "$pkg/Cargo.toml" -- --check
+          done
+      - name: cargo clippy (host)
+        run: |
+          set -e
+          for pkg in $HOST_PACKAGES; do
+            cargo clippy --manifest-path "$pkg/Cargo.toml" --all-targets -- -D warnings
+          done
       - run: cargo clippy --manifest-path firmwares/rp2040/Cargo.toml --release -- -D warnings
 
   host:
@@ -24,11 +46,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - run: cargo test --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder
+      - name: cargo test
+        run: |
+          set -e
+          for pkg in $HOST_PACKAGES; do
+            cargo test --manifest-path "$pkg/Cargo.toml"
+          done
 
   rp2040:
     runs-on: ubuntu-latest
@@ -43,17 +72,34 @@ jobs:
   coverage:
     name: Coverage (host crates)
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - run: rustup component add llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --exclude lucy-embedded-firmware-rp2040 --exclude builder --lcov --output-path lcov.info
+      - name: cargo llvm-cov
+        id: cov
+        run: |
+          set -e
+          files=()
+          for pkg in $HOST_PACKAGES; do
+            # No test, no coverage data: llvm-cov then fails to export (crates/pwm).
+            if ! grep -rqE '#\[(test|cfg\(test\))\]' "$pkg/src" "$pkg/tests" 2>/dev/null; then
+              echo "$pkg: no tests, no coverage to report"
+              continue
+            fi
+            out="lcov-${pkg//\//-}.info"
+            cargo llvm-cov --manifest-path "$pkg/Cargo.toml" --lcov --output-path "$out"
+            files+=("$out")
+          done
+          echo "files=$(IFS=,; echo "${files[*]}")" >> "$GITHUB_OUTPUT"
       - uses: codecov/codecov-action@v4
         if: success()
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
+          files: ${{ steps.cov.outputs.files }}
           flags: lucy_embedded_firmware
           name: lucy_embedded_firmware
           fail_ci_if_error: false
