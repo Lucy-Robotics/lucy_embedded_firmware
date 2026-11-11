@@ -114,8 +114,19 @@ mod tests {
 
     #[test]
     fn missing_or_invalid_domain_is_zero() {
-        for domain in [None, Some(""), Some("abc"), Some("3x"), Some("-1"), Some("+3")] {
-            assert_eq!(shm_name_in_domain("so_arm", domain), "/so_arm.domain0", "{domain:?}");
+        for domain in [
+            None,
+            Some(""),
+            Some("abc"),
+            Some("3x"),
+            Some("-1"),
+            Some("+3"),
+        ] {
+            assert_eq!(
+                shm_name_in_domain("so_arm", domain),
+                "/so_arm.domain0",
+                "{domain:?}"
+            );
         }
     }
 }
