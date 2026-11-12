@@ -1,148 +1,35 @@
-use lucy_embedded_firmware_core::actuator::ActuatorGroup;
-use lucy_embedded_firmware_core::joint::*;
+use lucy_embedded_firmware_core::joint::CommandConfig;
 use lucy_embedded_firmware_core::robot::Robot;
 
-use lucy_embedded_firmware_feetech::feetech::{
-    FeetechBusConfig, FeetechBusDriver, FeetechServoConfig,
-};
-use lucy_embedded_firmware_security::limits::PositionLimitGuard;
-use lucy_embedded_firmware_security::thermal::{ThermalGuard, ThermalLimit};
-
 use crate::board::Resources;
-use crate::board::Uart0Channel;
 
-use core::f32::consts::{PI, TAU};
+/// Must match HI ``MAX_ACTUATORS`` / mcu_bridge frame size.
+pub const JOINTS: usize = 32;
 
-pub const JOINTS: usize = 6;
+const JOINTS_CONFIG: [CommandConfig; JOINTS] = [CommandConfig {
+    default: 0.0,
+    limit_min: 0.0,
+    limit_max: 0.0,
+}; JOINTS];
 
-pub type LucyRobot = Robot<JOINTS, (ThermalGuard<JOINTS>, PositionLimitGuard<JOINTS>)>;
-
-pub const JOINTS_CONFIG: [CommandConfig; JOINTS] = [
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-    CommandConfig {
-        default: PI,
-        limit_min: 0.0,
-        limit_max: TAU,
-    },
-];
-
-pub const FEETECH_0: FeetechBusConfig<6> = FeetechBusConfig {
-    servos: [
-        FeetechServoConfig {
-            id: 1,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-        FeetechServoConfig {
-            id: 2,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-        FeetechServoConfig {
-            id: 3,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-        FeetechServoConfig {
-            id: 4,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-        FeetechServoConfig {
-            id: 5,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-        FeetechServoConfig {
-            id: 6,
-            amplitude: TAU,
-            min_pulse: 0,
-            max_pulse: 4096,
-            torque: 2.94,
-            gear_ratio: 1.0,
-            stall_current: 2.7,
-            no_load_current: 0.18,
-            current_lsb: 0.0065,
-        },
-    ],
-};
-
-pub const THERMAL_LIMITS: [ThermalLimit; JOINTS] = [ThermalLimit::new(65.0, 55.0); JOINTS];
+/// No position guard: the projected tables clamp each pulse to its servo travel.
+pub type LucyRobot = Robot<JOINTS, ()>;
 
 pub fn get_robot() -> LucyRobot {
-    Robot::new(
-        &JOINTS_CONFIG,
-        (
-            ThermalGuard::new(&THERMAL_LIMITS),
-            PositionLimitGuard::new(&JOINTS_CONFIG),
-        ),
-    )
+    Robot::new(&JOINTS_CONFIG, ())
 }
 
-pub fn robot_tick(tick: u64, robot: &mut LucyRobot, resources: &mut Resources) -> bool {
-    let mut driver = FeetechBusDriver::<Uart0Channel, 6>::new(&FEETECH_0);
+/// Drive header PWM + PCA banks from the projected tables. Always succeeds (open-loop).
+pub fn robot_tick(_tick: u64, robot: &mut LucyRobot, resources: &mut Resources) -> bool {
     robot.tick(|command, state| {
-        driver
-            .update(
-                tick,
-                &mut resources.uart0,
-                &mut command[0..6],
-                &mut state[0..6],
-            )
-            .is_ok()
+        crate::headers::write(&mut resources.slices, command);
+        if let Some(bank) = resources.i2c.as_mut() {
+            bank.write_rows(command);
+        }
+        // Open-loop echo so USB state frames match the last commanded positions.
+        for (state, command) in state.iter_mut().zip(command.iter()) {
+            state.position = command.position;
+        }
+        true
     })
 }

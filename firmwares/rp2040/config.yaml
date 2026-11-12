@@ -1,0 +1,13 @@
+# Desk stub for `cargo check` without LUCY_FIRMWARE_CONFIG.
+# Pipeline builds always inject a projected board YAML via that env var.
+board_id: rp2040_dev_stub
+serial_id: ""
+node_name: dev_stub
+pwm:
+  - amplitude_rad: 3.141592653589793
+    min_pulse_us: 500
+    max_pulse_us: 2500
+    virtual_pin: 0
+    header: 1
+    identity: Servo1
+i2c_pwm: []
