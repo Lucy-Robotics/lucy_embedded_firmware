@@ -11,8 +11,12 @@ use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
 use lucy_embedded_firmware_host::usb_port::{ClearBuffer, UsbPort, UsbPortConfig};
 use lucy_embedded_firmware_serial::SerialChannel;
 
+mod link_file;
+mod pico_diagnosis;
+use link_file::LinkFile;
+
 /// Must match `JOINTS` in `firmwares/rp2040/src/config.rs`.
-const RP2040_JOINTS: usize = 6;
+const RP2040_JOINTS: usize = 32;
 
 const REPLY_TIMEOUT: Duration = Duration::from_millis(60);
 const LINK_TIMEOUT: Duration = Duration::from_millis(200);
@@ -46,7 +50,10 @@ impl std::fmt::Display for ReplyError {
         match self {
             ReplyError::Timeout => write!(f, "no reply within {REPLY_TIMEOUT:?}"),
             ReplyError::Io(e) => write!(f, "io error ({:?}): {e}", e.kind()),
-            ReplyError::Corrupt(e) => write!(f, "corrupt frame ({e})"),
+            ReplyError::Corrupt(e) => write!(
+                f,
+                "corrupt frame ({e}); reflash the board if its firmware is older than this mcu_bridge"
+            ),
         }
     }
 }
@@ -175,7 +182,7 @@ fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)
     let mut said = None;
     while !stop_requested() {
         let state = if lock.is_some_and(|l| l.exists()) {
-            "is being flashed"
+            "is being flashed".to_string()
         } else {
             match [Board::Rp2040, Board::Mega]
                 .into_iter()
@@ -191,10 +198,10 @@ fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)
                     }
                     return Some((port, board));
                 }
-                None => "not found",
+                None => pico_diagnosis::not_found_reason(serial.unwrap_or_default()),
             }
         };
-        if said != Some(state) {
+        if said.as_deref() != Some(state.as_str()) {
             println!("Board {label} {state}, waiting");
             said = Some(state);
         }
@@ -204,7 +211,8 @@ fn connect(serial: Option<&str>, lock: Option<&Path>) -> Option<(UsbPort, Board)
 }
 
 fn main() {
-    let shm = Shm::attach(&node_name());
+    let node = node_name();
+    let shm = Shm::attach(&node);
 
     install_stop_handler();
 
@@ -222,7 +230,7 @@ fn main() {
     macro_rules! dispatch {
         ($($w:literal)*) => {
             match width {
-                $($w => run::<$w>(shm, port, board, serial, lock),)*
+                $($w => run::<$w>(shm, port, board, serial, lock, LinkFile::for_node(&node)),)*
                 w => panic!("no link for {w} slots (shm declares {} joints)", shm.max_actuators()),
             }
         };
@@ -236,6 +244,7 @@ fn run<const N: usize>(
     board: Board,
     serial: Option<String>,
     lock: Option<PathBuf>,
+    mut link: LinkFile,
 ) {
     let n = shm.max_actuators();
     let joints = if board == Board::Mega {
@@ -291,6 +300,7 @@ fn run<const N: usize>(
             Ok(()) => match wait_reply(&mut port, &mut decoder, seq) {
                 Ok(states) => {
                     write_states(&mut shm, joints, &states);
+                    link.record();
                     last_answer = Instant::now();
                     last_reply = Some(last_answer);
                     if answering != Some(true) {

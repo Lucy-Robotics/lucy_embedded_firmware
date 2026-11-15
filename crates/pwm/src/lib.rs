@@ -1,4 +1,7 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+
+pub mod pca9685;
+pub mod pulse;
 
 pub trait PwmChannel {
     type Error;
