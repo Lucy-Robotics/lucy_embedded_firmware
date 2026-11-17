@@ -60,15 +60,20 @@ function(lucy_cargo_firmware)
     set(binary ${target_dir}/release/${ARG_BIN})
   endif()
 
-  set(commands COMMAND ${cargo_env} ${CARGO_EXECUTABLE} ${cargo_args})
+  string(REPLACE ";" "|" cargo_arg "${cargo_env};${CARGO_EXECUTABLE};${cargo_args}")
+  set(runner ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/lucy_cargo_run.cmake)
+  set(commands COMMAND ${CMAKE_COMMAND} -DLABEL=${PROJECT_NAME}
+    "-DRUN_COMMAND=${cargo_arg}" -P ${runner})
   if(ARG_UF2)
-    list(APPEND commands COMMAND ${cargo_env} ${ELF2UF2_EXECUTABLE} ${binary} ${binary}.uf2)
+    string(REPLACE ";" "|" uf2_arg
+      "${cargo_env};${ELF2UF2_EXECUTABLE};${binary};${binary}.uf2")
+    list(APPEND commands COMMAND ${CMAKE_COMMAND} -DLABEL=${PROJECT_NAME}-uf2
+      "-DRUN_COMMAND=${uf2_arg}" -P ${runner})
   endif()
 
   add_custom_target(cargo_build ALL
     ${commands}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    USES_TERMINAL
     VERBATIM)
 
   if(ARG_UF2)
