@@ -17,9 +17,7 @@ use std::time::Instant;
 
 pub const JOINTS: usize = 6;
 
-/// Control loop at 100 Hz.
 pub const TICK_PERIOD_US: u32 = 10_000;
-/// Loop timing is logged and reported over 10 s windows.
 pub const TIMING_WINDOW_TICKS: u32 = 1_000;
 
 pub type LucyRobot = Robot<JOINTS, (ThermalGuard<JOINTS>, PositionLimitGuard<JOINTS>)>;
@@ -146,10 +144,7 @@ pub fn get_robot() -> LucyRobot {
 }
 
 pub struct Telemetry {
-    /// When each servo last answered a position read. The bus result alone can't say which one
-    /// failed, and the SHM state counter advances regardless.
     pub last_seen: [Option<Instant>; 6],
-    /// Paces the control loop and measures its jitter.
     pub loop_timer: LoopTimer,
 }
 

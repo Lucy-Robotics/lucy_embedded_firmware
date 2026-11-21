@@ -128,9 +128,7 @@ fn collect_states<const N: usize, G: Guard>(robot: &Robot<N, G>) -> JointStates<
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
-/// Control loop at 1 kHz.
 const TICK_PERIOD_US: u32 = 1_000;
-/// Loop timing is reported over 1 s windows.
 const TIMING_WINDOW_TICKS: u32 = 1_000;
 const COMMAND_TIMEOUT: MicrosDurationU64 = MicrosDurationU64::millis(200);
 
@@ -182,7 +180,6 @@ fn main() -> ! {
     loop {
         resources.watchdog.feed();
         let tick_start = resources.timer.get_counter().ticks();
-        // The timer counts microseconds; the loop timer tolerates the u32 wrap.
         let _ = loop_timer.begin(tick_start as u32);
         usb_dev.poll(&mut [&mut serial, &mut reset]);
 

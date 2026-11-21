@@ -39,7 +39,6 @@ pub(crate) fn records_json(records: &[HomingRecord; 6]) -> String {
     format!("[{}]", items.join(","))
 }
 
-/// Last complete timing window, `null` until the first one closes.
 fn loop_json(timer: &LoopTimer) -> String {
     timer.report().map_or_else(
         || "null".to_string(),

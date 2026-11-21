@@ -54,7 +54,6 @@ fn main() {
         .command_seq
         .load(core::sync::atomic::Ordering::SeqCst);
 
-    // Wraps after ~71 min, which the loop timer tolerates.
     let epoch = Instant::now();
     let now_us = || epoch.elapsed().as_micros() as u32;
     let mut tick_count: u64 = 0;

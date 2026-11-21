@@ -2,7 +2,6 @@ use lucy_embedded_firmware_telemetry::loop_timer::{LoopReport, LoopTimer, Pace};
 
 const PERIOD: u32 = 1_000;
 
-/// Ticks starting at each timestamp, each doing `busy` µs of work.
 fn run(timer: &mut LoopTimer, starts: &[u32], busy: u32) {
     for &start in starts {
         timer.begin(start);
@@ -40,7 +39,6 @@ fn steady_loop_has_no_jitter() {
 #[test]
 fn late_tick_shows_as_jitter_on_both_sides() {
     let mut timer = LoopTimer::new(PERIOD, 4);
-    // Third tick starts 500 µs late; the fourth is back on schedule.
     run(&mut timer, &[0, 1_000, 2_000, 3_500, 4_000], 100);
     let report = timer.report().unwrap();
     assert_eq!(report.period_min_us, 500);
@@ -124,7 +122,6 @@ fn deadlines_do_not_drift_with_a_late_wake_up() {
     let mut timer = LoopTimer::new(PERIOD, 4);
     timer.begin(0);
     timer.end(100);
-    // Woke up 50 µs late: the next deadline stays at 2 000.
     timer.begin(1_050);
     assert_eq!(timer.end(1_100), Pace::Wait(900));
 }
