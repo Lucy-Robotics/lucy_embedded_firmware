@@ -52,23 +52,23 @@ impl<const M: usize, G: Guard> Robot<M, G> {
 
     pub fn sync_write_shm(&mut self, shm: &SharedTable) {
         let n = M.min(shm.max_actuators());
-        for i in 0..n {
-            self.joints_command[i].position = shm.hw_commands()[i];
-            self.joints_command[i].velocity = shm.hw_velocities()[i];
-            self.joints_command[i].acceleration = shm.hw_accelerations()[i];
-            self.joints_command[i].torque_enabled = TorqueStatus::from(shm.hw_torque_enabled()[i]);
+        for (i, command) in self.joints_command.iter_mut().enumerate().take(n) {
+            command.position = shm.hw_commands()[i];
+            command.velocity = shm.hw_velocities()[i];
+            command.acceleration = shm.hw_accelerations()[i];
+            command.torque_enabled = TorqueStatus::from(shm.hw_torque_enabled()[i]);
         }
     }
 
     pub fn sync_read_shm(&self, shm: &mut SharedTable) {
         let n = M.min(shm.max_actuators());
-        for i in 0..n {
-            shm.hw_positions_mut()[i] = self.joints_state[i].position;
-            shm.hw_temperatures_mut()[i] = self.joints_state[i].temperature;
-            shm.hw_efforts_mut()[i] = self.joints_state[i].effort;
-            shm.hw_currents_mut()[i] = self.joints_state[i].current;
-            shm.hw_loads_mut()[i] = self.joints_state[i].load;
-            shm.hw_voltages_mut()[i] = self.joints_state[i].voltage;
+        for (i, state) in self.joints_state.iter().enumerate().take(n) {
+            shm.hw_positions_mut()[i] = state.position;
+            shm.hw_temperatures_mut()[i] = state.temperature;
+            shm.hw_efforts_mut()[i] = state.effort;
+            shm.hw_currents_mut()[i] = state.current;
+            shm.hw_loads_mut()[i] = state.load;
+            shm.hw_voltages_mut()[i] = state.voltage;
         }
     }
 }

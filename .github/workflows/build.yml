@@ -12,7 +12,7 @@ on:
 env:
   HOST_PACKAGES: >-
     crates/communication crates/core crates/feetech crates/host crates/pwm
-    crates/pwm-servo crates/security crates/serial
+    crates/pwm-servo crates/security crates/serial crates/telemetry
     firmwares/linux firmwares/mcu_bridge
 
 jobs:

@@ -4,6 +4,7 @@
 use lucy_embedded_firmware_core::guard::Guard;
 use lucy_embedded_firmware_core::joint::TorqueStatus;
 use lucy_embedded_firmware_core::robot::Robot;
+use lucy_embedded_firmware_telemetry::loop_timer::{LoopTimer, Pace};
 
 use rp2040_hal::fugit::ExtU32;
 use rp2040_hal::fugit::MicrosDurationU64;
@@ -127,7 +128,8 @@ fn collect_states<const N: usize, G: Guard>(robot: &Robot<N, G>) -> JointStates<
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
-const TICK_PERIOD: MicrosDurationU64 = MicrosDurationU64::micros(1000);
+const TICK_PERIOD_US: u32 = 1_000;
+const TIMING_WINDOW_TICKS: u32 = 1_000;
 const COMMAND_TIMEOUT: MicrosDurationU64 = MicrosDurationU64::millis(200);
 
 #[entry]
@@ -144,6 +146,7 @@ fn main() -> ! {
     let mut last_command_tick: Option<u64> = None;
     let mut tick_count: u64 = 0;
     let mut last_error_tick: u64 = 0;
+    let mut loop_timer = LoopTimer::new(TICK_PERIOD_US, TIMING_WINDOW_TICKS);
 
     let mut ws2812 = resources.ws.take().unwrap();
 
@@ -177,6 +180,7 @@ fn main() -> ! {
     loop {
         resources.watchdog.feed();
         let tick_start = resources.timer.get_counter().ticks();
+        let _ = loop_timer.begin(tick_start as u32);
         usb_dev.poll(&mut [&mut serial, &mut reset]);
 
         if usb_dev.state() != UsbDeviceState::Configured {
@@ -226,10 +230,8 @@ fn main() -> ! {
             led_on = !led_on;
         }
 
-        let elapsed_ticks = resources.timer.get_counter().ticks() - tick_start;
-        if elapsed_ticks < TICK_PERIOD.ticks() {
-            let remaining_ticks = TICK_PERIOD.ticks() - elapsed_ticks;
-            resources.delay.delay_us(remaining_ticks as u32);
+        if let Pace::Wait(us) = loop_timer.end(resources.timer.get_counter().ticks() as u32) {
+            resources.delay.delay_us(us);
         }
     }
 }

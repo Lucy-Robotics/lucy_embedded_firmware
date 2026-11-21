@@ -25,6 +25,7 @@ pixi run firmware-flash
 |------|------|
 | `crates/lucy_embedded_firmware_core` | `no_std` Modbus + PWM servo drivers |
 | `crates/builder` | YAML → `config.rs` codegen |
+| `crates/telemetry` | `no_std` board telemetry: loop pacing and jitter |
 | `firmwares/rp2040` | Bare-metal RP2040 binary |
 | `firmwares/sim` | Host-side Modbus client (dev) |
 
