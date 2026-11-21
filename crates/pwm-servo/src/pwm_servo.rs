@@ -2,8 +2,8 @@ use core::f32::consts::PI;
 use core::marker::PhantomData;
 use lucy_embedded_firmware_core::actuator::ActuatorGroup;
 use lucy_embedded_firmware_core::joint::{Command, State, TorqueStatus};
-use lucy_embedded_firmware_core::utils::map_range;
 use lucy_embedded_firmware_pwm::PwmChannel;
+use lucy_embedded_firmware_pwm::pulse::pulse_width_us;
 
 pub enum PwmServoError {
     CommunicationError,
@@ -19,8 +19,8 @@ impl Default for PwmServoConfig {
     fn default() -> Self {
         PwmServoConfig {
             amplitude: PI,
-            min_pulse: 544,
-            max_pulse: 2400,
+            min_pulse: 500,
+            max_pulse: 2500,
         }
     }
 }
@@ -66,13 +66,12 @@ impl<C: PwmChannel> PwmServoDriver<C> {
             return Ok(());
         }
 
-        let pulse = (map_range(
+        let pulse = pulse_width_us(
             command[0].position,
-            0f32,
             self.config.amplitude,
-            self.config.min_pulse as f32,
-            self.config.max_pulse as f32,
-        ) + 0.5) as u16;
+            self.config.min_pulse,
+            self.config.max_pulse,
+        );
 
         bus.set_pwm(pulse)
             .map_err(|_| PwmServoError::CommunicationError)?;
@@ -136,5 +135,12 @@ mod tests {
     #[test]
     fn torque_enabled_maps_position() {
         assert_eq!(pulse_for(TorqueStatus::Enabled, PI / 2.0), Some(1500));
+    }
+
+    #[test]
+    fn default_travel_is_half_a_turn_on_500_to_2500_us() {
+        let config = PwmServoConfig::default();
+        assert_eq!(config.amplitude, PI);
+        assert_eq!((config.min_pulse, config.max_pulse), (500, 2500));
     }
 }
