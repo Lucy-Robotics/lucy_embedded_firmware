@@ -30,8 +30,6 @@ pub struct Resources {
     pub config: UsbPortConfig,
     pub usb0: Option<UsbPort>,
     pub open_adapter: Option<Adapter>,
-    /// As of the last refresh. Refreshes stop while the bus is open, so this then lists what was
-    /// plugged when it opened.
     pub adapters: Vec<Adapter>,
     pub selected: Option<String>,
     pub link: Link,
