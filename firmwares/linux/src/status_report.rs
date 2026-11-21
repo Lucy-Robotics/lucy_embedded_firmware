@@ -2,6 +2,7 @@
 
 use lucy_embedded_firmware_core::joint::TorqueStatus;
 use lucy_embedded_firmware_feetech::feetech::{FeetechBusError, HomingRecord};
+use lucy_embedded_firmware_telemetry::loop_timer::LoopTimer;
 
 use std::time::Instant;
 
@@ -36,6 +37,27 @@ pub(crate) fn records_json(records: &[HomingRecord; 6]) -> String {
         })
         .collect();
     format!("[{}]", items.join(","))
+}
+
+/// Last complete timing window, `null` until the first one closes.
+fn loop_json(timer: &LoopTimer) -> String {
+    timer.report().map_or_else(
+        || "null".to_string(),
+        |r| {
+            format!(
+                "{{\"period_us\":{},\"samples\":{},\"period_min_us\":{},\"period_mean_us\":{},\"period_max_us\":{},\"jitter_mean_us\":{},\"jitter_max_us\":{},\"busy_max_us\":{},\"overruns\":{}}}",
+                r.period_us,
+                r.samples,
+                r.period_min_us,
+                r.period_mean_us,
+                r.period_max_us,
+                r.jitter_mean_us,
+                r.jitter_max_us,
+                r.busy_max_us,
+                r.overruns,
+            )
+        },
+    )
 }
 
 fn optional_string(value: Option<&str>) -> String {
@@ -85,7 +107,7 @@ pub(crate) fn status_json(
         .collect();
 
     format!(
-        "{{\"ok\":true,\"link\":{},\"adapters\":[{}],\"selected\":{},\"open_serial\":{},\"open_error\":{},\"servos\":[{}]}}",
+        "{{\"ok\":true,\"link\":{},\"adapters\":[{}],\"selected\":{},\"open_serial\":{},\"open_error\":{},\"servos\":[{}],\"loop\":{}}}",
         json_string(resources.link.as_str()),
         adapters.join(","),
         optional_string(resources.selected.as_deref()),
@@ -97,13 +119,14 @@ pub(crate) fn status_json(
         ),
         optional_string(resources.open_error.as_deref()),
         servos.join(","),
+        loop_json(&telemetry.loop_timer),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::get_robot;
+    use crate::config::{TICK_PERIOD_US, TIMING_WINDOW_TICKS, get_robot};
     use crate::test_support::offline;
     use core::f32::consts::TAU;
     use std::time::Duration;
@@ -137,6 +160,30 @@ mod tests {
             .and_then(|s| s.parse().ok())
             .unwrap();
         assert!(age >= 5000, "{reply}");
+    }
+
+    #[test]
+    fn status_has_no_loop_timing_before_a_full_window() {
+        let reply = status_json(&get_robot(), &offline(), &Telemetry::default());
+        assert!(reply.ends_with(",\"loop\":null}"), "{reply}");
+    }
+
+    #[test]
+    fn status_reports_the_last_loop_timing_window() {
+        let mut telemetry = Telemetry::default();
+        let timer = &mut telemetry.loop_timer;
+        for tick in 0..=TIMING_WINDOW_TICKS {
+            let start = tick * TICK_PERIOD_US + if tick == 50 { 300 } else { 0 };
+            timer.begin(start);
+            timer.end(start + 2_000);
+        }
+        let reply = status_json(&get_robot(), &offline(), &telemetry);
+        assert!(
+            reply.ends_with(
+                ",\"loop\":{\"period_us\":10000,\"samples\":1000,\"period_min_us\":9700,\"period_mean_us\":10000,\"period_max_us\":10300,\"jitter_mean_us\":0,\"jitter_max_us\":300,\"busy_max_us\":2000,\"overruns\":0}}"
+            ),
+            "{reply}"
+        );
     }
 
     #[test]

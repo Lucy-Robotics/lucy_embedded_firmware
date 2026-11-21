@@ -6,6 +6,7 @@ use lucy_embedded_firmware_feetech::feetech::{
 };
 use lucy_embedded_firmware_security::limits::PositionLimitGuard;
 use lucy_embedded_firmware_security::thermal::{ThermalGuard, ThermalLimit};
+use lucy_embedded_firmware_telemetry::loop_timer::LoopTimer;
 
 use crate::resources::Resources;
 use lucy_embedded_firmware_host::usb_port::UsbPort;
@@ -15,6 +16,11 @@ use std::io::Write;
 use std::time::Instant;
 
 pub const JOINTS: usize = 6;
+
+/// Control loop at 100 Hz.
+pub const TICK_PERIOD_US: u32 = 10_000;
+/// Loop timing is logged and reported over 10 s windows.
+pub const TIMING_WINDOW_TICKS: u32 = 1_000;
 
 pub type LucyRobot = Robot<JOINTS, (ThermalGuard<JOINTS>, PositionLimitGuard<JOINTS>)>;
 
@@ -139,11 +145,21 @@ pub fn get_robot() -> LucyRobot {
     )
 }
 
-/// When each servo last answered a position read. The bus result alone can't say which one failed,
-/// and the SHM state counter advances regardless.
-#[derive(Default)]
 pub struct Telemetry {
+    /// When each servo last answered a position read. The bus result alone can't say which one
+    /// failed, and the SHM state counter advances regardless.
     pub last_seen: [Option<Instant>; 6],
+    /// Paces the control loop and measures its jitter.
+    pub loop_timer: LoopTimer,
+}
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self {
+            last_seen: [None; 6],
+            loop_timer: LoopTimer::new(TICK_PERIOD_US, TIMING_WINDOW_TICKS),
+        }
+    }
 }
 
 pub fn robot_tick(

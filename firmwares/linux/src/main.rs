@@ -1,9 +1,10 @@
 use std::io::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lucy_embedded_firmware_core::data::LinkState;
 use lucy_embedded_firmware_host::shm::{Shm, node_name};
 use lucy_embedded_firmware_host::signal::{install_stop_handler, stop_requested};
+use lucy_embedded_firmware_telemetry::loop_timer::Pace;
 
 mod resources;
 
@@ -53,14 +54,17 @@ fn main() {
         .command_seq
         .load(core::sync::atomic::Ordering::SeqCst);
 
-    let period = Duration::from_millis(10);
-    let mut next_tick = std::time::Instant::now();
+    // Wraps after ~71 min, which the loop timer tolerates.
+    let epoch = Instant::now();
+    let now_us = || epoch.elapsed().as_micros() as u32;
     let mut tick_count: u64 = 0;
     let mut faulted = false;
     let mut gains_set = false;
 
     while !stop_requested() {
-        next_tick += period;
+        if let Some(report) = telemetry.loop_timer.begin(now_us()) {
+            let _ = writeln!(std::io::stdout(), "Loop timing: {report}");
+        }
 
         let command_seq = ass
             .header()
@@ -119,16 +123,15 @@ fn main() {
             break;
         }
 
-        let now = std::time::Instant::now();
-        if now < next_tick {
-            std::thread::sleep(next_tick - now);
-        } else {
-            let _ = writeln!(
-                std::io::stderr(),
-                "Warning: tick took longer than expected {:?}",
-                now - next_tick
-            );
-            next_tick = now;
+        match telemetry.loop_timer.end(now_us()) {
+            Pace::Wait(us) => std::thread::sleep(Duration::from_micros(us.into())),
+            Pace::Late(us) => {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "Warning: tick took longer than expected {:?}",
+                    Duration::from_micros(us.into())
+                );
+            }
         }
         tick_count += 1;
     }

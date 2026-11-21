@@ -12,5 +12,6 @@ lucy-embedded-firmware-core = { path = "../../crates/core" }
 lucy-embedded-firmware-feetech = { path = "../../crates/feetech" }
 lucy-embedded-firmware-security = { path = "../../crates/security" }
 lucy-embedded-firmware-host = { path = "../../crates/host" }
+lucy-embedded-firmware-telemetry = { path = "../../crates/telemetry" }
 crc = "3.4.0"
 libc = "0.2.189"
