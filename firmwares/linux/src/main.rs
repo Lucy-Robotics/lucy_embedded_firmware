@@ -22,7 +22,7 @@ mod usb_port;
 use config::{Telemetry, get_robot, robot_release, robot_tick, set_position_gains};
 use maintenance_handler::handle_maintenance;
 
-/// Control ticks between looking for plugged or unplugged adapters (1 s).
+/// Control ticks between looking for adapters while the bus is down (1 s).
 const ADAPTER_REFRESH_TICKS: u64 = 100;
 
 fn main() {
@@ -74,7 +74,10 @@ fn main() {
             last_command_seq = command_seq;
         }
 
-        if tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
+        // Listing adapters walks every tty through libudev and costs several ms, enough to
+        // overrun a tick. An open bus needs no listing: unplugging it fails the next read,
+        // which drops the port.
+        if !board.connected() && tick_count.is_multiple_of(ADAPTER_REFRESH_TICKS) {
             board.refresh();
         }
 
