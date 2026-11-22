@@ -1,0 +1,11 @@
+[package]
+name = "lucy-embedded-firmware-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lucy-embedded-firmware-core = { path = "../../crates/core" }
+lucy-embedded-firmware-serial = { path = "../../crates/serial" }
+serialport = "4.10.0"
+memmap2 = "0.9.11"
+libc = "0.2.189"

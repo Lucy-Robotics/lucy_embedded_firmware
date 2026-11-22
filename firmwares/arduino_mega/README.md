@@ -1,0 +1,46 @@
+# Arduino Mega 2560 firmware
+
+One Mega per `i2c_pwm_only` board of the robot hardware YAML. Servos hang off the PCA9685s
+chained on the Mega's I2C bus (D20 SDA / D21 SCL), listed in the board's `pca_addresses`, or sit
+straight on Mega pins (the Nervo ribbons), listed in `mega_pins` and pulsed in turn by Timer5
+within a 20 ms frame (8 pins at most; not D0/D1 or D20/D21). `physical_pin` numbers the PCA
+outputs first, then the `mega_pins` in order.
+
+The board tables (PCA addresses, per-slot limits, which slot drives which output) are not in
+this crate: `lucy_config_generator` writes them from the YAML as `config_<board>.rs`, and the
+build includes the file named by `LUCY_MEGA_BOARD_CONFIG`. Outputs are numbered across chips:
+`physical_pin` 1-16 is the first address's channels 0-15, 17-32 the second's. Only enabled
+actuators are driven, and the build fails if a limit leaves the 0..180 deg servo travel or two
+driven slots share an output.
+
+## Build and flash
+
+From the LCP: activate a configuration with the board selected; the config pipeline generates,
+builds and flashes it. From the workspace root:
+
+```sh
+pixi run firmware-flash-mega mega_right   # --robot <pkg>, --port <dev>, --build-only
+```
+
+Both need `avr-gcc` and `avrdude` on the host and find the Mega by its USB serial (`serial_id`).
+
+## Run
+
+`lucy.launch.py real:=true` starts one bridge per Mega board that has a `serial_id`:
+
+```sh
+lucy-embedded-firmware-mcu-bridge <node_name> <serial_id>   # e.g. right 1453230323235110C0D0
+```
+
+While a board is flashed, `/tmp/.lucy_mcu_flashing_<serial_id>` exists and its bridge waits.
+
+Each tick the firmware checks its PCA9685s: one that stops answering is reported in the last
+state slot, and the bridge prints `PCA9685 0x40 not answering` (the LCP shows it as a warning).
+One that answers again after losing power is set up again.
+
+## Check the I2C bus
+
+`examples/i2c_scan.rs` lists the I2C devices every 2 s at 57600 baud. Build it with
+`cargo build --release --example i2c_scan` (with `LUCY_MEGA_BOARD_CONFIG` set), flash
+`target/avr-none/release/examples/i2c_scan.elf` with avrdude while holding the board's flash
+lock, read the port, then flash the board's firmware back.

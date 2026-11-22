@@ -1,0 +1,17 @@
+PWMServo:
+  config:
+    min_angle: {type: float, unit: rad, default: 0.0}
+    max_angle: {type: float, unit: rad, default: 0.0}
+    default_angle: {type: float, unit: rad, default: 0.0}
+  state:
+    angle: {access: rw, type: float, unit: rad, value: 0.0}
+  commands:
+    move: {opcode: 0x01}
+    reset: {opcode: 0x02}
+    calibrate: {opcode: 0x03}
+
+PressureSensor:
+  state:
+    value: {access: r, type: float, unit: raw}
+  commands:
+    read: {opcode: 0x01}

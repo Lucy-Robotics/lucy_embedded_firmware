@@ -1,0 +1,3 @@
+[general]
+board = "mega2560"
+open-console = false
